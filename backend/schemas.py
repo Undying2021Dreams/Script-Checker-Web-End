@@ -68,6 +68,28 @@ class SubmissionSummary(BaseModel):
     needs_review_count: int | None
 
 
+class StudentAssignment(BaseModel):
+    """
+    A paper as a student sees it.
+
+    Carries no document content: a Question's content holds the model
+    answers inline, so the paper reaches a student only as the rendered
+    PDF, which omits them.
+    """
+
+    question_id: str
+    course_id: str
+    total_marks: int
+    page_count: int | None
+    finalized_at: datetime | None
+    submission_id: str | None
+    submission_status: str | None
+    released: bool
+    # Withheld until the teacher releases the marks.
+    earned: float | None
+    max_score: int | None
+
+
 # ── Grading ─────────────────────────────────────────────────────────
 
 class GradeRunRequest(BaseModel):

@@ -141,3 +141,17 @@ export interface GroundTruthPreview {
   /** Rendered image of the model answer itself. */
   image_id?: string
 }
+
+/** A paper as a student sees it — never carries document content. */
+export interface StudentAssignment {
+  question_id: string
+  course_id: string
+  total_marks: number
+  page_count: number | null
+  finalized_at: string | null
+  submission_id: string | null
+  submission_status: SubmissionGrades['grading_status'] | null
+  released: boolean
+  earned: number | null
+  max_score: number | null
+}
