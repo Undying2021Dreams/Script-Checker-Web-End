@@ -25,6 +25,12 @@ export function QuestionEditorPage() {
   const isFinalized = question?.state === 'finalized'
 
   const handleDocChange = async (payload: QuestionDocPayload) => {
+    // The editor's autosave is debounced, so a keystroke from just before
+    // finalizing can land after it. A finalized question rejects saves
+    // (409), which surfaced as an error the teacher could do nothing
+    // about — drop the stale save instead.
+    if (isFinalized) return
+
     latest.current = payload
     setSaveState('saving')
     try {
@@ -59,6 +65,8 @@ export function QuestionEditorPage() {
     }
     try {
       await finalize.mutateAsync()
+      // Nothing further should be saved against this question now.
+      latest.current = null
       toast.success('Finalized — the PDF is ready to print')
     } catch (err) {
       toast.error((err as Error).message)

@@ -9,7 +9,7 @@ another student's scanned work.
 
 import pytest
 
-from models import Course, CropImage, Enrollment, Question, Submission
+from models import AnswerBox, Course, CropImage, Enrollment, Question, Submission
 
 
 @pytest.fixture
@@ -197,3 +197,78 @@ def test_inlining_leaves_external_images_alone(db, course):
 
     doc = {"type": "doc", "content": [{"type": "image", "attrs": {"src": "https://example.com/x.png"}}]}
     assert _inline_uploaded_images(doc, db)["content"][0]["attrs"]["src"] == "https://example.com/x.png"
+
+
+def test_every_render_path_gets_images_inlined(client, course, db, monkeypatch):
+    """
+    Each render call must be handed inlined content, not just the PDF one.
+
+    The renderer's browser can't authenticate, so a linked image 401s and
+    the render falls back to the img tag's alt text — which is the
+    original filename. That looked like "the preview shows a file name".
+    Fixing only the PDF path left the question and model-answer previews
+    still broken, so this asserts on all of them rather than the symptom.
+    """
+    from models import GroundTruthBox, UploadedImage
+
+    q = Question(course_id=course.id, created_by=course.teacher_id, state="draft")
+    db.add(q)
+    db.flush()
+    # id is assigned on flush, so set it explicitly — the src below is
+    # built from it before anything is written.
+    img = UploadedImage(id="11111111-2222-3333-4444-555555555555", question_id=q.id,
+                        filename="diagram.png", content_type="image/png", data=b"PNGBYTES")
+    db.add(img)
+
+    figure = {"type": "image", "attrs": {"src": f"http://localhost:8000/api/images/{img.id}"}}
+    q.content = {
+        "type": "doc",
+        "content": [
+            {"type": "paragraph", "content": [{"type": "text", "text": "Sketch it."}]},
+            figure,
+            {"type": "answerBox", "attrs": {"id": "rb1", "label": "a", "points": 5}},
+            {"type": "groundTruthBox", "attrs": {"id": "rg1", "label": "Sol"}},
+        ],
+    }
+    db.add(GroundTruthBox(id="rg1", question_id=q.id, order_index=0, content={"type": "doc", "content": [figure]}))
+    db.add(AnswerBox(id="rb1", question_id=q.id, label="a", points=5, order_index=0))
+    db.commit()
+
+    seen: dict[str, list] = {"question": [], "ground_truth": [], "pdf": []}
+
+    def _srcs(node, out):
+        if isinstance(node, list):
+            for n in node:
+                _srcs(n, out)
+        elif isinstance(node, dict):
+            if node.get("type") == "image":
+                out.append((node.get("attrs") or {}).get("src", ""))
+            _srcs(node.get("content") or [], out)
+        return out
+
+    def fake_question_image(content, **kwargs):
+        seen["question"].extend(_srcs(content, []))
+        return b"PNG"
+
+    def fake_gt_image(content):
+        seen["ground_truth"].extend(_srcs(content, []))
+        return b"PNG"
+
+    def fake_finalize(question_dict):
+        seen["pdf"].extend(_srcs(question_dict.get("content"), []))
+        return {"page_w_px": 794, "page_h_px": 1123, "page_count": 1,
+                # boxes maps a box id to its segments, each [page, x, y, w, h]
+                "boxes": {"rb1": [[0, 10, 20, 100, 50]]}, "pdf_data": b"%PDF-"}
+
+    import services.doc_renderer as dr
+    monkeypatch.setattr(dr, "render_question_to_image", fake_question_image)
+    monkeypatch.setattr(dr, "render_ground_truth_box_to_image", fake_gt_image)
+    monkeypatch.setattr(dr, "render_finalized_question", fake_finalize)
+
+    res = client.as_user(course.teacher).post(f"/api/questions/{q.id}/finalize")
+    assert res.status_code == 200, res.text
+
+    for path, srcs in seen.items():
+        assert srcs, f"{path} render received no images at all"
+        for src in srcs:
+            assert src.startswith("data:"), f"{path} render got a linked image the browser can't fetch: {src}"
