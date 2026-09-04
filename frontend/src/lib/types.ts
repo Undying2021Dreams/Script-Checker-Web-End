@@ -180,3 +180,21 @@ export interface Gradebook {
   questions: { id: string; title: string | null; state: string; created_at: string }[]
   rows: GradebookRow[]
 }
+
+export interface RubricSuggestion {
+  id: string
+  suggested_points: number
+  rubric: string
+}
+
+export interface CorrectnessResult {
+  ground_truth_box_id: string
+  label: string
+  index: number
+  /** null when the check itself couldn't run. */
+  ok: boolean | null
+  issue: string | null
+  explanation: string
+  suggested_question: string | null
+  suggested_answer: string | null
+}

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { apiFetch } from './api'
 import type {
+  CorrectnessResult,
   Course,
   Gradebook,
   CourseSummary,
@@ -11,6 +12,7 @@ import type {
   GroupedSubmission,
   Question,
   QuestionDocPayload,
+  RubricSuggestion,
   SubmissionGrades,
   StudentAssignment,
   SubmissionSummary,
@@ -255,5 +257,27 @@ export function useGradebook(courseId: string, enabled: boolean) {
     queryKey: ['gradebook', courseId],
     queryFn: () => apiFetch<Gradebook>(`/courses/${courseId}/gradebook`),
     enabled,
+  })
+}
+
+// ── Authoring helpers ───────────────────────────────────────────────
+
+export function useSuggestRubric(questionId: string) {
+  return useMutation({
+    mutationFn: (provider: string) =>
+      apiFetch<{ suggestions: RubricSuggestion[] }>(`/questions/${questionId}/suggest-rubric`, {
+        method: 'POST',
+        body: JSON.stringify({ provider }),
+      }),
+  })
+}
+
+export function useCheckAnswerKey(questionId: string) {
+  return useMutation({
+    mutationFn: (provider: string) =>
+      apiFetch<{ results: CorrectnessResult[] }>(`/questions/${questionId}/check-correctness`, {
+        method: 'POST',
+        body: JSON.stringify({ provider }),
+      }),
   })
 }
