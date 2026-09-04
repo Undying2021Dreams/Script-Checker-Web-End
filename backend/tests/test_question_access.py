@@ -324,3 +324,62 @@ def test_clone_makes_an_editable_copy_with_fresh_box_ids(client, course, db):
 def test_cloning_someone_elses_question_is_refused(client, course, question, make_user):
     other = make_user(role="teacher")
     assert client.as_user(other).post(f"/api/questions/{question.id}/clone").status_code == 404
+
+
+def test_submitting_a_real_page_persists_its_crops(client, course, db):
+    """
+    The full loop: finalize a paper, feed its own printed page back in,
+    and check the extracted crops are actually stored.
+
+    This is the case the earlier submission tests missed. They uploaded
+    bytes that weren't an image, so extraction found no markers and
+    produced no crops — and crops are exactly what broke. crop_images
+    holds a real foreign key to submissions, and the submission row was
+    being created last, so Postgres rejected every crop insert. Component-1
+    got away with the same ordering only because SQLite leaves foreign
+    keys unenforced by default.
+    """
+    from pdf2image import convert_from_bytes
+
+    content = {
+        "type": "doc",
+        "content": [
+            {"type": "paragraph", "content": [{"type": "text", "text": "Solve for x: 2x + 4 = 10"}]},
+            {"type": "answerBox", "attrs": {"id": "e2e-box", "label": "a", "points": 5}},
+        ],
+    }
+    created = client.as_user(course.teacher).post(
+        "/api/questions", params={"course_id": course.id}, json={}
+    ).json()
+    qid = created["question_id"]
+    boxes = [{"id": "e2e-box", "label": "a", "points": 5}]
+    client.as_user(course.teacher).put(
+        f"/api/questions/{qid}/blocks",
+        json={"content": content, "answer_boxes": boxes, "ground_truth_boxes": []},
+    )
+    assert client.as_user(course.teacher).post(f"/api/questions/{qid}/finalize").status_code == 200
+
+    pdf = client.as_user(course.teacher).get(f"/api/questions/{qid}/pdf").content
+    page_png = convert_from_bytes(pdf, dpi=200, fmt="png")[0]
+
+    import io
+    buf = io.BytesIO()
+    page_png.save(buf, format="PNG")
+
+    res = client.as_user(course.teacher).post(
+        "/api/submissions",
+        data={"question_id": qid, "modality": "scanner"},
+        files={"image": ("page.png", buf.getvalue(), "image/png")},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+
+    # The printed markers should be found on the paper's own render.
+    page = body["pages"][0]
+    assert page["markers_detected"] == "4/4", page
+    assert page["crops"], "extraction produced no crops from the paper's own page"
+
+    # And the crops must have survived the commit.
+    stored = db.query(CropImage).filter(CropImage.submission_id == body["submission_id"]).all()
+    assert stored, "crops were extracted but not persisted"
+    assert {c.answer_box_id for c in stored} == {"e2e-box"}
