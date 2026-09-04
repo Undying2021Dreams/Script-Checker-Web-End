@@ -130,3 +130,14 @@ export interface GroupedSubmission {
   modality: string
   answer_boxes: GroupedAnswerBox[]
 }
+
+/** A model answer as rendered at finalize — what the grader is shown. */
+export interface GroundTruthPreview {
+  id: string
+  label: string
+  question_id: string
+  /** Rendered image of the question this answers. */
+  question_image_id: string | null
+  /** Rendered image of the model answer itself. */
+  image_id?: string
+}
