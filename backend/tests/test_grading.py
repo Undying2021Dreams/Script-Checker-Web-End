@@ -576,3 +576,51 @@ def test_students_cannot_bulk_grade(client, graded_setup, monkeypatch):
         json={"provider": "self_hosted"},
     )
     assert res.status_code == 404
+
+
+# ── Provider errors ─────────────────────────────────────────────────
+
+@pytest.mark.parametrize("body,expected", [
+    # Anthropic / Gemini shape
+    ({"error": {"message": "Your credit balance is too low"}}, "credit balance is too low"),
+    # OpenAI nests the same way
+    ({"error": {"message": "Incorrect API key provided"}}, "Incorrect API key"),
+    # Some gateways return a bare string
+    ({"error": "quota exceeded"}, "quota exceeded"),
+    ({"message": "service unavailable"}, "service unavailable"),
+])
+def test_provider_errors_carry_the_reason(body, expected):
+    """
+    httpx's own raise_for_status throws away the response body, which is
+    where the actual reason lives. A teacher who clicks Grade needs "credit
+    balance is too low", not "400 Bad Request".
+    """
+    import httpx
+
+    from services.llm_provider import _raise_for_status
+
+    resp = httpx.Response(400, json=body, request=httpx.Request("POST", "https://x"))
+    with pytest.raises(RuntimeError) as exc:
+        _raise_for_status(resp, "Claude")
+
+    assert "Claude" in str(exc.value)
+    assert "400" in str(exc.value)
+    assert expected in str(exc.value)
+
+
+def test_non_json_provider_errors_still_say_something():
+    import httpx
+
+    from services.llm_provider import _raise_for_status
+
+    resp = httpx.Response(502, text="<html>Bad Gateway</html>", request=httpx.Request("POST", "https://x"))
+    with pytest.raises(RuntimeError, match="502"):
+        _raise_for_status(resp, "OpenAI")
+
+
+def test_a_successful_response_is_left_alone():
+    import httpx
+
+    from services.llm_provider import _raise_for_status
+
+    _raise_for_status(httpx.Response(200, json={}, request=httpx.Request("POST", "https://x")), "Claude")
