@@ -226,6 +226,24 @@ async def create_submission(
         p["page_index"]: p for p in ((sub.manifest or {}).get("pages", []) if sub else [])
     }
 
+    if sub is None:
+        # The row has to exist before extraction stores any crops against
+        # it: crop_images.submission_id is a real foreign key, and Postgres
+        # enforces it. Component-1 built the submission last and got away
+        # with it only because SQLite leaves foreign keys unenforced by
+        # default — the manifest and dpi are filled in below once
+        # extraction has actually produced them.
+        sub = Submission(
+            id=sub_id,
+            question_id=question_id,
+            # A teacher uploading a scanned stack isn't its author, so only
+            # attribute the submission when a student submits their own.
+            student_id=user.id if user.role == "student" else None,
+            modality=modality,
+        )
+        db.add(sub)
+        db.flush()
+
     question_dict = _question_to_dict(q)
 
     raw_bytes = await image.read()
@@ -282,22 +300,9 @@ async def create_submission(
         "pages": page_results,
     }
 
-    if sub is not None:
-        sub.modality = modality
-        sub.image_dpi = page_results[0].get("image_dpi") if page_results else sub.image_dpi
-        sub.manifest = manifest
-    else:
-        sub = Submission(
-            id=sub_id,
-            question_id=question_id,
-            # A teacher uploading a scanned stack isn't its author, so only
-            # attribute the submission when a student submits their own.
-            student_id=user.id if user.role == "student" else None,
-            modality=modality,
-            image_dpi=page_results[0].get("image_dpi") if page_results else None,
-            manifest=manifest,
-        )
-        db.add(sub)
+    sub.modality = modality
+    sub.image_dpi = page_results[0].get("image_dpi") if page_results else sub.image_dpi
+    sub.manifest = manifest
 
     db.commit()
 
