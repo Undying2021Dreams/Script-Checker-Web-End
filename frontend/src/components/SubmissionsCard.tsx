@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useSubmissions, useUploadSubmission } from '@/lib/queries'
+import { useGradeAll, useSubmissions, useUploadSubmission } from '@/lib/queries'
 import type { SubmissionSummary } from '@/lib/types'
 
 function StatusBadge({ submission }: { submission: SubmissionSummary }) {
@@ -26,12 +26,39 @@ function StatusBadge({ submission }: { submission: SubmissionSummary }) {
   )
 }
 
+const PROVIDERS = [
+  { value: 'self_hosted', label: 'Self-hosted (free)' },
+  { value: 'gemini', label: 'Gemini' },
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'claude', label: 'Claude' },
+]
+
 export function SubmissionsCard({ questionId }: { questionId: string }) {
   const navigate = useNavigate()
   const { data: submissions, isLoading, error } = useSubmissions(questionId)
   const upload = useUploadSubmission(questionId)
+  const gradeAll = useGradeAll(questionId)
   const fileRef = useRef<HTMLInputElement>(null)
   const [modality, setModality] = useState('photo')
+  const [provider, setProvider] = useState('self_hosted')
+
+  const inFlight = submissions?.some(
+    (s) => s.grading_status === 'queued' || s.grading_status === 'grading',
+  )
+  const ungraded = submissions?.filter((s) => s.grading_status !== 'graded').length ?? 0
+
+  const runGradeAll = async (includeGraded: boolean) => {
+    try {
+      const res = await gradeAll.mutateAsync({ provider, includeGraded })
+      if (res.queued === 0) {
+        toast.info(`Nothing to mark — ${res.skipped} already done`)
+      } else {
+        toast.success(`Marking ${res.queued} submission(s)`)
+      }
+    } catch (err) {
+      toast.error((err as Error).message)
+    }
+  }
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -75,6 +102,43 @@ export function SubmissionsCard({ questionId }: { questionId: string }) {
       </CardHeader>
 
       <CardContent className="space-y-2">
+        {!!submissions?.length && (
+          <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 px-3 py-2">
+            <span className="text-sm font-medium">Mark all</span>
+            <select
+              value={provider}
+              onChange={(e) => setProvider(e.target.value)}
+              className="rounded-md border bg-transparent px-2 py-1 text-xs"
+            >
+              {PROVIDERS.map((p) => (
+                <option key={p.value} value={p.value}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+            <Button
+              size="sm"
+              onClick={() => runGradeAll(false)}
+              disabled={gradeAll.isPending || inFlight}
+            >
+              {inFlight ? 'Marking…' : `Mark ${ungraded} unmarked`}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => runGradeAll(true)}
+              disabled={gradeAll.isPending || inFlight}
+              title="Re-marks everything, including work already marked. Your own marks are kept."
+            >
+              Re-mark all
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              Runs one at a time. Open any submission to change a mark, or to re-mark just that one
+              with a different model.
+            </span>
+          </div>
+        )}
+
         {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
         {error && <p className="text-sm text-destructive">{(error as Error).message}</p>}
         {submissions?.length === 0 && (

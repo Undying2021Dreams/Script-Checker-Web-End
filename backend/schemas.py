@@ -101,6 +101,18 @@ class GradeRunRequest(BaseModel):
     provider: Literal["gemini", "openai", "claude", "self_hosted"] = "self_hosted"
 
 
+class BulkGradeRequest(BaseModel):
+    provider: Literal["gemini", "openai", "claude", "self_hosted"] = "self_hosted"
+    # Off by default so a rerun doesn't spend calls re-marking work the
+    # teacher has already looked at.
+    include_graded: bool = False
+
+
+class BulkGradeStarted(BaseModel):
+    queued: int
+    skipped: int
+
+
 class GradeOverride(BaseModel):
     # None clears the override and falls back to the model's own mark.
     score: float | None = None
