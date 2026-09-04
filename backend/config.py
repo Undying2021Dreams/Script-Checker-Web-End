@@ -37,6 +37,14 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
     SELF_HOSTED_LLM_URL: str = ""  # e.g. "https://xxxx.ngrok.io/v1"
 
+    # Model ids are configurable because providers retire them: the
+    # gemini-2.5-flash this was originally pinned to stopped accepting new
+    # users, which surfaced as a 404 at call time rather than anywhere
+    # obvious.
+    GEMINI_MODEL: str = "gemini-3.6-flash"
+    OPENAI_MODEL: str = "gpt-4o-mini"
+    CLAUDE_MODEL: str = "claude-haiku-4-5-20251001"
+
     # ArUco / fiducial marker config
     ARUCO_DICT: str = "DICT_4X4_50"
     MARKER_SIZE_PX: int = 60   # ~1 cm at 150 DPI

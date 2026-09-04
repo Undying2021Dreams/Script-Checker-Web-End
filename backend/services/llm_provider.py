@@ -241,7 +241,9 @@ class LLMProvider(ABC):
 
 
 class GeminiProvider(LLMProvider):
-    MODEL = "gemini-2.5-flash"
+    @property
+    def MODEL(self) -> str:
+        return settings.GEMINI_MODEL
 
     async def suggest_rubric(self, question_text: str, boxes: list[dict]) -> list[dict]:
         api_key = settings.GEMINI_API_KEY
@@ -339,7 +341,9 @@ class GeminiProvider(LLMProvider):
 
 
 class OpenAIProvider(LLMProvider):
-    MODEL = "gpt-4o-mini"
+    @property
+    def MODEL(self) -> str:
+        return settings.OPENAI_MODEL
     BASE_URL = "https://api.openai.com/v1/chat/completions"
 
     def _headers(self) -> dict:
@@ -424,7 +428,9 @@ class OpenAIProvider(LLMProvider):
 
 
 class ClaudeProvider(LLMProvider):
-    MODEL = "claude-haiku-4-5-20251001"
+    @property
+    def MODEL(self) -> str:
+        return settings.CLAUDE_MODEL
     BASE_URL = "https://api.anthropic.com/v1/messages"
 
     def _headers(self) -> dict:
