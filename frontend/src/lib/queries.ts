@@ -136,6 +136,14 @@ export function useRenameQuestion(questionId: string) {
   })
 }
 
+export function useCloneQuestion(questionId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => apiFetch<Question>(`/questions/${questionId}/clone`, { method: 'POST' }),
+    onSuccess: (q) => qc.invalidateQueries({ queryKey: ['questions', q.course_id] }),
+  })
+}
+
 export function useFinalizeQuestion(questionId: string) {
   const qc = useQueryClient()
   return useMutation({

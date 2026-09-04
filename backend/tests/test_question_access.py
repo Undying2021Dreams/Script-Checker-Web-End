@@ -272,3 +272,55 @@ def test_every_render_path_gets_images_inlined(client, course, db, monkeypatch):
         assert srcs, f"{path} render received no images at all"
         for src in srcs:
             assert src.startswith("data:"), f"{path} render got a linked image the browser can't fetch: {src}"
+
+
+def test_clone_makes_an_editable_copy_with_fresh_box_ids(client, course, db):
+    """
+    Cloning is the only way to change a finalized paper, so it has to
+    produce a genuinely independent draft. Answer box ids especially must
+    not be shared: an id threads from the editor to the QR printed on the
+    page to the extracted crop, so two papers sharing one would make a
+    scan of the original resolve against the copy.
+    """
+    from models import GroundTruthBox
+
+    content = {
+        "type": "doc",
+        "content": [
+            {"type": "paragraph", "content": [{"type": "text", "text": "Solve it"}]},
+            {"type": "answerBox", "attrs": {"id": "orig-box", "label": "a", "points": 7}},
+            {"type": "groundTruthBox", "attrs": {"id": "orig-gt", "label": "Sol"}},
+        ],
+    }
+    original = Question(
+        course_id=course.id, created_by=course.teacher_id, state="finalized",
+        content=content, page_count=1, title="Midterm",
+    )
+    db.add(original)
+    db.flush()
+    db.add(AnswerBox(id="orig-box", question_id=original.id, label="a", points=7, order_index=0))
+    db.add(GroundTruthBox(id="orig-gt", question_id=original.id, order_index=0))
+    db.commit()
+
+    res = client.as_user(course.teacher).post(f"/api/questions/{original.id}/clone")
+    assert res.status_code == 201, res.text
+    copy = res.json()
+
+    assert copy["question_id"] != original.id
+    assert copy["state"] == "draft"          # editable again
+    assert copy["course_id"] == course.id    # stays in the same course
+
+    assert copy["title"] == "Midterm (copy)"  # distinguishable in a list
+
+    box = copy["answer_boxes"][0]
+    assert box["id"] != "orig-box"           # a fresh id, not the printed one
+    assert box["points"] == 7                # but the same marks
+
+    # The original is untouched and still finalized.
+    db.expire_all()
+    assert db.query(Question).filter(Question.id == original.id).one().state == "finalized"
+
+
+def test_cloning_someone_elses_question_is_refused(client, course, question, make_user):
+    other = make_user(role="teacher")
+    assert client.as_user(other).post(f"/api/questions/{question.id}/clone").status_code == 404

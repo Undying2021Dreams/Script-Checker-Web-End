@@ -895,6 +895,9 @@ def clone_question(question_id: str, user: User = Depends(require_teacher), db: 
         # author, since they're the one who now owns this draft.
         course_id=original.course_id,
         created_by=user.id,
+        # Marked as a copy rather than inheriting the name outright, so two
+        # papers with the same title aren't indistinguishable in a list.
+        title=f"{original.title} (copy)" if original.title else None,
         state="draft",
         physical_page=original.physical_page,
         dpi=original.dpi,
