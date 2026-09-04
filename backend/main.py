@@ -9,7 +9,7 @@ from slowapi.util import get_remote_address
 
 from config import settings
 from models import User
-from routers import courses, grading, images, questions, submissions
+from routers import courses, grading, images, questions, student, submissions
 from schemas import UserOut
 from security import get_current_user
 
@@ -46,6 +46,7 @@ api.include_router(questions.router)
 api.include_router(submissions.router)
 api.include_router(images.router)
 api.include_router(grading.router)
+api.include_router(student.router)
 app.include_router(api)
 
 

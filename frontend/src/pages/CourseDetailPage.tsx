@@ -1,6 +1,7 @@
 import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
+import { AssignmentsCard } from '@/components/AssignmentsCard'
 import { QuestionsCard } from '@/components/QuestionsCard'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -111,7 +112,11 @@ export function CourseDetailPage() {
         </Card>
       )}
 
-      {isTeacher && <QuestionsCard courseId={courseId} />}
+      {isTeacher ? (
+        <QuestionsCard courseId={courseId} />
+      ) : (
+        <AssignmentsCard courseId={courseId} enabled={!!me} />
+      )}
     </div>
   )
 }

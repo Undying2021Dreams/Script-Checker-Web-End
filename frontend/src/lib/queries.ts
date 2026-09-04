@@ -11,6 +11,7 @@ import type {
   Question,
   QuestionDocPayload,
   SubmissionGrades,
+  StudentAssignment,
   SubmissionSummary,
 } from './types'
 
@@ -219,6 +220,16 @@ export function useGroundTruthPreviews(questionId: string, enabled: boolean) {
   return useQuery({
     queryKey: ['ground-truth', questionId],
     queryFn: () => apiFetch<GroundTruthPreview[]>(`/questions/${questionId}/ground-truth`),
+    enabled,
+  })
+}
+
+// ── Student ─────────────────────────────────────────────────────────
+
+export function useAssignments(courseId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['assignments', courseId],
+    queryFn: () => apiFetch<StudentAssignment[]>(`/student/assignments?course_id=${courseId}`),
     enabled,
   })
 }
