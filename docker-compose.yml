@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: webend
+      POSTGRES_PASSWORD: webend_dev_only
+      POSTGRES_DB: webend
+    ports:
+      - "5434:5432"
+    volumes:
+      - webend_pg_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+volumes:
+  webend_pg_data:

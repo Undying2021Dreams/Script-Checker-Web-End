@@ -1,0 +1,51 @@
+/* The "page" is a visual affordance only — width fixed to A4 proportions,
+   height auto so it grows as the teacher types. No absolute positioning;
+   multi-page falls out of page breaks at export time. */
+.doc-page {
+  width: 794px; /* A4 @ 96dpi */
+  min-height: 1123px;
+  margin: 0 auto;
+  padding: 72px 64px;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.06),
+    0 2px 8px rgba(0, 0, 0, 0.08),
+    0 16px 40px rgba(0, 0, 0, 0.14);
+}
+
+.doc-page .ProseMirror {
+  outline: none;
+  font-size: 15px;
+  line-height: 1.6;
+  color: #1a1a1a;
+  min-height: 900px;
+}
+
+.doc-page .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: #adb5bd;
+  pointer-events: none;
+  height: 0;
+}
+
+.question-image {
+  max-width: 100%;
+  border-radius: 6px;
+  margin: 10px 0;
+  display: block;
+}
+
+/* Export renders this same markup headless, so let content paginate
+   naturally rather than being forced into the fixed .doc-page box. */
+@media print {
+  .doc-page {
+    box-shadow: none;
+    margin: 0;
+    width: auto;
+    min-height: 0;
+  }
+  .answer-box-node,
+  .ground-truth-box-node {
+    break-inside: avoid;
+  }
+}

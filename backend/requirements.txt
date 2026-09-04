@@ -1,0 +1,35 @@
+# Core (carried over from Component-1)
+fastapi>=0.110
+uvicorn[standard]>=0.29
+sqlalchemy>=2.0
+pydantic>=2.0
+pydantic-settings>=2.0
+python-multipart>=0.0.9
+opencv-contrib-python>=4.9
+numpy>=1.26
+qrcode[pil]>=7.4
+Pillow>=10.2
+google-generativeai>=0.5
+httpx>=0.27
+pyzbar>=0.1.9
+pdf2image>=1.17
+playwright>=1.45
+
+# Database (Postgres + migrations, replacing SQLite + hand-rolled migration code)
+psycopg2-binary>=2.9
+alembic>=1.13
+
+# Auth (Microsoft Entra ID)
+fastapi-azure-auth>=4.3
+
+# Background jobs (Playwright/OpenCV/LLM calls off the request path)
+arq>=0.26
+redis>=5.0
+
+# Abuse-defense
+slowapi>=0.1.9
+
+# Tests
+pytest>=8.0
+
+pytest-asyncio>=0.23

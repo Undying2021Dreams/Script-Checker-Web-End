@@ -1,0 +1,41 @@
+# ── Secrets ─────────────────────────────────────────────────────────
+# Real config carries the Entra client id, teacher emails and LLM API
+# keys. Only the .example files are committed.
+.env
+.env.*
+!.env.example
+
+# ── Python ──────────────────────────────────────────────────────────
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ── Node ────────────────────────────────────────────────────────────
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# ── Local data ──────────────────────────────────────────────────────
+# Uploaded scans, generated PDFs and any local database are student work
+# and test artefacts, not source.
+*.db
+*.sqlite
+*.sqlite3
+backend/uploads/
+backend/pdfs/
+backend/ground_truth_storage/
+
+# ── OS / editor ─────────────────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# ── Logs ────────────────────────────────────────────────────────────
+*.log
