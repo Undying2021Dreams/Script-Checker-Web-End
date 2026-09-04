@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { AnswerKeyPreview } from '@/components/AnswerKeyPreview'
+import { AnswerKeyCheck, RubricSuggestions } from '@/components/AuthoringHelpers'
 import { SubmissionsCard } from '@/components/SubmissionsCard'
 import QuestionEditor from '@/components/editor/QuestionEditor'
 import { Badge } from '@/components/ui/badge'
@@ -176,6 +177,15 @@ export function QuestionEditorPage() {
           Finalizing freezes the layout and prints the alignment markers students' scans are
           matched against. Edit before you finalize — afterwards you'll need to clone it.
         </p>
+      )}
+
+      {/* Authoring aids belong while the paper can still change; once
+          finalized, acting on their advice means cloning it anyway. */}
+      {!isFinalized && question.ground_truth_boxes.length > 0 && (
+        <AnswerKeyCheck questionId={questionId} />
+      )}
+      {!isFinalized && question.answer_boxes.length > 0 && (
+        <RubricSuggestions questionId={questionId} answerBoxes={question.answer_boxes} />
       )}
 
       {/* Both only exist once the paper is frozen: finalize is what
