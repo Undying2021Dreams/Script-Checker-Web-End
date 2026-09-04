@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from './api'
 import type {
   Course,
+  Gradebook,
   CourseSummary,
   EnrolledStudent,
   Me,
@@ -230,6 +231,14 @@ export function useAssignments(courseId: string, enabled: boolean) {
   return useQuery({
     queryKey: ['assignments', courseId],
     queryFn: () => apiFetch<StudentAssignment[]>(`/student/assignments?course_id=${courseId}`),
+    enabled,
+  })
+}
+
+export function useGradebook(courseId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['gradebook', courseId],
+    queryFn: () => apiFetch<Gradebook>(`/courses/${courseId}/gradebook`),
     enabled,
   })
 }

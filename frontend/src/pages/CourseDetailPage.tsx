@@ -43,7 +43,12 @@ export function CourseDetailPage() {
         <Link to="/" className="text-sm text-muted-foreground hover:underline">
           ← My courses
         </Link>
-        <h1 className="mt-2 text-2xl font-semibold">{course.title}</h1>
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-semibold">{course.title}</h1>
+          {isTeacher && (
+            <Button variant="outline" size="sm" render={<Link to={`/courses/${courseId}/gradebook`}>Gradebook</Link>} nativeButton={false} />
+          )}
+        </div>
         <p className="text-sm text-muted-foreground">
           {course.teacher_name} · {course.student_count} enrolled
         </p>
