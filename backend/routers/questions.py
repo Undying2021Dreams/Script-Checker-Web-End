@@ -651,7 +651,7 @@ def regenerate_ground_truth(question_id: str, user: User = Depends(require_teach
     for gt_box in q.ground_truth_boxes:
         try:
             segment_bytes = render_question_to_image(
-                q.content,
+                _inline_uploaded_images(q.content, db),
                 canvas_w=q.page_w_px or 794,
                 canvas_h=q.page_h_px or 1123,
                 up_to_gt_box_id=gt_box.id,
@@ -681,7 +681,7 @@ def regenerate_ground_truth(question_id: str, user: User = Depends(require_teach
                 gt_box.content = extracted[gt_box.id]
 
         try:
-            png_bytes = render_ground_truth_box_to_image(gt_box.content or {})
+            png_bytes = render_ground_truth_box_to_image(_inline_uploaded_images(gt_box.content or {}, db))
             if png_bytes:
                 db.add(GroundTruthImage(
                     ground_truth_box_id=gt_box.id,
@@ -736,7 +736,7 @@ def finalize_question(question_id: str, user: User = Depends(require_teacher), d
     try:
         for gt_box in q.ground_truth_boxes:
             segment_bytes = render_question_to_image(
-                q.content,
+                _inline_uploaded_images(q.content, db),
                 canvas_w=q.page_w_px or 794,
                 canvas_h=q.page_h_px or 1123,
                 up_to_gt_box_id=gt_box.id,
@@ -762,7 +762,7 @@ def finalize_question(question_id: str, user: User = Depends(require_teacher), d
                 gt_box.content = extracted[gt_box.id]
 
         try:
-            png_bytes = render_ground_truth_box_to_image(gt_box.content or {})
+            png_bytes = render_ground_truth_box_to_image(_inline_uploaded_images(gt_box.content or {}, db))
             if png_bytes:
                 db.add(GroundTruthImage(
                     ground_truth_box_id=gt_box.id,
