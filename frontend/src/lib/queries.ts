@@ -274,10 +274,12 @@ export function useSuggestRubric(questionId: string) {
 
 export function useCheckAnswerKey(questionId: string) {
   return useMutation({
-    mutationFn: (provider: string) =>
+    // groundTruthBoxId scopes the check to one sub-question; omitted, the
+    // whole paper is checked.
+    mutationFn: ({ provider, groundTruthBoxId }: { provider: string; groundTruthBoxId?: string }) =>
       apiFetch<{ results: CorrectnessResult[] }>(`/questions/${questionId}/check-correctness`, {
         method: 'POST',
-        body: JSON.stringify({ provider }),
+        body: JSON.stringify({ provider, ground_truth_box_id: groundTruthBoxId ?? null }),
       }),
   })
 }

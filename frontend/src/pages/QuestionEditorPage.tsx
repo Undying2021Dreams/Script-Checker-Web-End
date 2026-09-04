@@ -181,8 +181,11 @@ export function QuestionEditorPage() {
 
       {/* Authoring aids belong while the paper can still change; once
           finalized, acting on their advice means cloning it anyway. */}
-      {!isFinalized && question.ground_truth_boxes.length > 0 && (
-        <AnswerKeyCheck questionId={questionId} />
+      {!isFinalized && (
+        <AnswerKeyCheck
+          questionId={questionId}
+          groundTruthBoxes={question.ground_truth_boxes}
+        />
       )}
       {!isFinalized && question.answer_boxes.length > 0 && (
         <RubricSuggestions questionId={questionId} answerBoxes={question.answer_boxes} />
