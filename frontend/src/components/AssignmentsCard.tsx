@@ -65,8 +65,8 @@ function AssignmentRow({ assignment }: { assignment: StudentAssignment }) {
     <div className="space-y-3 rounded-md border px-3 py-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-sm">
-          <span className="font-mono text-xs text-muted-foreground">
-            {assignment.question_id.slice(0, 8)}
+          <span className={assignment.title ? 'font-medium' : 'text-muted-foreground'}>
+            {assignment.title || 'Untitled paper'}
           </span>
           <span className="ml-2 text-muted-foreground">
             {assignment.total_marks} marks

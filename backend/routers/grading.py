@@ -323,6 +323,9 @@ def gradebook(
 
     return {
         "course_id": course_id,
-        "questions": [{"id": q.id, "state": q.state, "created_at": q.created_at} for q in questions],
+        "questions": [
+            {"id": q.id, "title": q.title, "state": q.state, "created_at": q.created_at}
+            for q in questions
+        ],
         "rows": rows,
     }

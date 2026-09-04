@@ -8,7 +8,8 @@ import QuestionEditor from '@/components/editor/QuestionEditor'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { apiFetch, apiFetchBlobUrl } from '@/lib/api'
-import { useFinalizeQuestion, useQuestion, useSaveQuestion } from '@/lib/queries'
+import { Input } from '@/components/ui/input'
+import { useFinalizeQuestion, useQuestion, useRenameQuestion, useSaveQuestion } from '@/lib/queries'
 import type { QuestionDocPayload } from '@/lib/types'
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
@@ -18,6 +19,7 @@ export function QuestionEditorPage() {
   const { data: question, isLoading, error } = useQuestion(questionId)
   const save = useSaveQuestion(questionId)
   const finalize = useFinalizeQuestion(questionId)
+  const rename = useRenameQuestion(questionId)
 
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const latest = useRef<QuestionDocPayload | null>(null)
@@ -127,12 +129,18 @@ export function QuestionEditorPage() {
           >
             ← Back to course
           </Link>
-          <h1 className="mt-1 text-xl font-semibold">
-            Question{' '}
-            <span className="font-mono text-sm text-muted-foreground">
-              {question.question_id.slice(0, 8)}
-            </span>
-          </h1>
+          {/* Renaming stays available after finalizing: the title is
+              metadata and never reaches the printed page. */}
+          <Input
+            key={question.question_id}
+            defaultValue={question.title ?? ''}
+            placeholder="Untitled paper"
+            onBlur={(e) => {
+              const next = e.target.value.trim()
+              if (next !== (question.title ?? '')) rename.mutate(next)
+            }}
+            className="mt-1 h-auto border-none px-0 text-xl font-semibold shadow-none focus-visible:ring-0"
+          />
         </div>
 
         <div className="flex items-center gap-3">

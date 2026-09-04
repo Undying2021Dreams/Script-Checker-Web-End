@@ -46,8 +46,8 @@ export function QuestionsCard({ courseId }: { courseId: string }) {
               className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-left text-sm hover:bg-muted"
             >
               <span className="flex items-center gap-2">
-                <span className="font-mono text-xs text-muted-foreground">
-                  {q.question_id.slice(0, 8)}
+                <span className={q.title ? 'font-medium' : 'text-muted-foreground'}>
+                  {q.title || 'Untitled paper'}
                 </span>
                 <Badge variant={q.state === 'finalized' ? 'secondary' : 'outline'}>{q.state}</Badge>
               </span>

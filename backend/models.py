@@ -92,6 +92,8 @@ class Question(Base):
     id = Column(String, primary_key=True, default=_uuid)
     course_id = Column(String, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False)
     created_by = Column(String, ForeignKey("users.id"), nullable=False)
+    # Metadata, not printed content — so it stays editable after finalizing.
+    title = Column(String, nullable=True)
     state = Column(SAEnum("draft", "finalized", name="question_state"), default="draft", nullable=False)
     physical_page = Column(String, nullable=False, default="A4")
     dpi = Column(Integer, nullable=False, default=150)

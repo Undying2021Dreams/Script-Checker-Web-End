@@ -46,6 +46,7 @@ export interface GroundTruthBox {
 export interface Question {
   question_id: string
   course_id: string
+  title: string | null
   state: 'draft' | 'finalized'
   physical_page: string
   dpi: number
@@ -146,6 +147,7 @@ export interface GroundTruthPreview {
 export interface StudentAssignment {
   question_id: string
   course_id: string
+  title: string | null
   total_marks: number
   page_count: number | null
   finalized_at: string | null
@@ -175,6 +177,6 @@ export interface GradebookRow {
 
 export interface Gradebook {
   course_id: string
-  questions: { id: string; state: string; created_at: string }[]
+  questions: { id: string; title: string | null; state: string; created_at: string }[]
   rows: GradebookRow[]
 }
