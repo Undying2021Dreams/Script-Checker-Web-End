@@ -8,6 +8,8 @@ from database import SessionLocal, get_db
 from models import AnswerBox, AnswerGrade, Course, Enrollment, Question, Submission, User
 from schemas import (
     AnswerGradeOut,
+    BulkGradeStarted,
+    BulkGradeRequest,
     GradeOverride,
     GradeRunRequest,
     SubmissionGradesOut,
@@ -146,6 +148,89 @@ def run_grading(
 
     background.add_task(_grade_in_background, sub.id, body.provider)
     return _grades_payload(db, sub)
+
+
+async def _grade_many_in_background(submission_ids: list[str], provider_name: str) -> None:
+    """
+    Mark a batch, one submission after another.
+
+    Deliberately sequential. The self-hosted provider is a single GPU
+    process behind a tunnel, and firing concurrent requests at it fails
+    outright rather than queueing. Answer boxes within one submission are
+    already run a few at a time, which is as much concurrency as it takes.
+    """
+    provider = get_provider(provider_name)
+    for submission_id in submission_ids:
+        db = SessionLocal()
+        try:
+            sub = db.query(Submission).filter(Submission.id == submission_id).first()
+            if sub is None:
+                continue
+            await grade_submission(db, sub, provider, provider_name)
+        except Exception as exc:  # noqa: BLE001 — one failure mustn't stop the batch
+            logger.exception("Bulk grading failed for %s", submission_id)
+            sub = db.query(Submission).filter(Submission.id == submission_id).first()
+            if sub is not None:
+                sub.grading_status = "failed"
+                sub.grading_error = str(exc)
+                db.commit()
+        finally:
+            db.close()
+
+
+@router.post("/questions/{question_id}/grade-all", response_model=BulkGradeStarted)
+def grade_all_submissions(
+    question_id: str,
+    body: BulkGradeRequest,
+    background: BackgroundTasks,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Mark every submission on a paper in one go.
+
+    Already-graded work is skipped unless asked for, so a rerun after a
+    few new submissions arrive doesn't spend calls re-marking the rest.
+    Teacher overrides survive a re-grade either way.
+    """
+    question = db.query(Question).filter(Question.id == question_id).first()
+    if question is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Question not found")
+
+    course = db.query(Course).filter(Course.id == question.course_id).first()
+    if user.role != "admin" and (course is None or course.teacher_id != user.id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Question not found")
+
+    try:
+        get_provider(body.provider)
+    except (ValueError, ImportError) as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+
+    submissions = db.query(Submission).filter(Submission.question_id == question_id).all()
+
+    to_grade, skipped = [], 0
+    for sub in submissions:
+        # Never restart something already running, and leave graded work
+        # alone unless the teacher asked to redo it.
+        if sub.grading_status in ("queued", "grading"):
+            skipped += 1
+            continue
+        if sub.grading_status == "graded" and not body.include_graded:
+            skipped += 1
+            continue
+        to_grade.append(sub)
+
+    for sub in to_grade:
+        sub.grading_status = "queued"
+        sub.grading_error = None
+    db.commit()
+
+    if to_grade:
+        background.add_task(
+            _grade_many_in_background, [s.id for s in to_grade], body.provider
+        )
+
+    return BulkGradeStarted(queued=len(to_grade), skipped=skipped)
 
 
 @router.get("/submissions/{submission_id}/grades", response_model=SubmissionGradesOut)

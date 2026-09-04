@@ -214,6 +214,26 @@ export function useSubmissions(questionId: string) {
   return useQuery({
     queryKey: ['submissions', questionId],
     queryFn: () => apiFetch<SubmissionSummary[]>(`/submissions?question_id=${questionId}`),
+    // A batch run marks submissions one after another, so keep refreshing
+    // while any are still in flight and stop once they've all settled.
+    refetchInterval: (query) =>
+      query.state.data?.some(
+        (s) => s.grading_status === 'queued' || s.grading_status === 'grading',
+      )
+        ? 2500
+        : false,
+  })
+}
+
+export function useGradeAll(questionId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ provider, includeGraded }: { provider: string; includeGraded: boolean }) =>
+      apiFetch<{ queued: number; skipped: number }>(`/questions/${questionId}/grade-all`, {
+        method: 'POST',
+        body: JSON.stringify({ provider, include_graded: includeGraded }),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['submissions', questionId] }),
   })
 }
 

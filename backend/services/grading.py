@@ -48,10 +48,20 @@ serious error.
 If the transcript is NOTHING WRITTEN, the score is 0.
 If there is writing but you cannot make it out, the score is UNREADABLE.
 
-Otherwise mark the reasoning, not the handwriting: award partial credit \
-for work that is correct as far as it goes, give full marks for a \
-different but mathematically valid method, and ignore untidiness, \
+Otherwise mark the reasoning, not the handwriting: ignore untidiness, \
 crossings-out and spelling.
+
+If the model answer sets out a marking scheme — a breakdown of how many \
+marks each step or criterion is worth — follow it exactly. Award marks \
+for each criterion the transcript satisfies and none for those it does \
+not, and say in your feedback which criteria were met. The teacher's \
+scheme overrides your own judgement about what the work deserves.
+
+If it sets out no scheme, award partial credit for work that is correct \
+as far as it goes, and full marks for a different but valid method.
+
+Never exceed MAXIMUM MARK, even if a scheme in the model answer totals \
+something higher.
 
 Reply in exactly this format and nothing else:
 

@@ -493,3 +493,86 @@ async def test_a_written_answer_still_reaches_the_model():
 
     assert result["score"] == 4
     assert len(provider.calls) == 1
+
+
+# ── Bulk grading ────────────────────────────────────────────────────
+
+def _extra_submission(db, setup, student):
+    from models import CropImage, Enrollment, Submission
+
+    db.add(Enrollment(course_id=setup["course"].id, student_id=student.id))
+    sub = Submission(
+        question_id=setup["question"].id, student_id=student.id, modality="photo", manifest={},
+    )
+    db.add(sub)
+    db.flush()
+    db.add(CropImage(submission_id=sub.id, answer_box_id="a1", part=0, data=_image(["x = 3"])))
+    db.commit()
+    return sub
+
+
+def test_bulk_grading_marks_every_submission(client, graded_setup, db, make_user, monkeypatch):
+    second = _extra_submission(db, graded_setup, make_user(role="student"))
+    provider = FakeProvider(["SCORE: 5\nFEEDBACK: ok"] * 10)
+    monkeypatch.setattr("routers.grading.get_provider", lambda name: provider)
+
+    res = client.as_user(graded_setup["teacher"]).post(
+        f"/api/questions/{graded_setup['question'].id}/grade-all",
+        json={"provider": "self_hosted"},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json() == {"queued": 2, "skipped": 0}
+
+    for sub_id in (graded_setup["submission"].id, second.id):
+        body = client.as_user(graded_setup["teacher"]).get(f"/api/submissions/{sub_id}/grades").json()
+        assert body["grading_status"] == "graded", sub_id
+
+
+def test_bulk_grading_skips_work_already_marked(client, graded_setup, db, make_user, monkeypatch):
+    _extra_submission(db, graded_setup, make_user(role="student"))
+    monkeypatch.setattr(
+        "routers.grading.get_provider", lambda name: FakeProvider(["SCORE: 5\nFEEDBACK: ok"] * 10)
+    )
+    teacher = graded_setup["teacher"]
+    qid = graded_setup["question"].id
+
+    first = client.as_user(teacher).post(f"/api/questions/{qid}/grade-all", json={"provider": "self_hosted"})
+    assert first.json()["queued"] == 2
+
+    # A rerun shouldn't spend calls re-marking what's already done.
+    again = client.as_user(teacher).post(f"/api/questions/{qid}/grade-all", json={"provider": "self_hosted"})
+    assert again.json() == {"queued": 0, "skipped": 2}
+
+    # Unless asked for explicitly.
+    forced = client.as_user(teacher).post(
+        f"/api/questions/{qid}/grade-all", json={"provider": "self_hosted", "include_graded": True}
+    )
+    assert forced.json()["queued"] == 2
+
+
+def test_bulk_grading_preserves_teacher_overrides(client, graded_setup, monkeypatch):
+    teacher = graded_setup["teacher"]
+    sub = graded_setup["submission"]
+    monkeypatch.setattr(
+        "routers.grading.get_provider", lambda name: FakeProvider(["SCORE: 5\nFEEDBACK: ok"] * 10)
+    )
+    _grade(client, teacher, sub.id)
+    client.as_user(teacher).patch(f"/api/submissions/{sub.id}/grades/a1", json={"score": 1})
+
+    client.as_user(teacher).post(
+        f"/api/questions/{graded_setup['question'].id}/grade-all",
+        json={"provider": "self_hosted", "include_graded": True},
+    )
+
+    body = client.as_user(teacher).get(f"/api/submissions/{sub.id}/grades").json()
+    a1 = next(g for g in body["grades"] if g["answer_box_id"] == "a1")
+    assert a1["score"] == 1  # the human's decision stands through a batch run
+
+
+def test_students_cannot_bulk_grade(client, graded_setup, monkeypatch):
+    monkeypatch.setattr("routers.grading.get_provider", lambda name: FakeProvider([]))
+    res = client.as_user(graded_setup["student"]).post(
+        f"/api/questions/{graded_setup['question'].id}/grade-all",
+        json={"provider": "self_hosted"},
+    )
+    assert res.status_code == 404
