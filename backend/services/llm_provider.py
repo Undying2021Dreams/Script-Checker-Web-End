@@ -142,6 +142,38 @@ def _clean_latex(text: str) -> str:
     return t
 
 
+def _raise_for_status(resp: httpx.Response, provider: str) -> None:
+    """
+    Fail with the provider's own explanation rather than a bare status.
+
+    httpx's raise_for_status discards the response body, which is where
+    hosted providers put the actual reason — "credit balance is too low",
+    "project has been denied access", a retired model id. Without it a
+    teacher clicking Grade sees "400 Bad Request" and has nothing to act
+    on, and neither does anyone reading the logs.
+    """
+    if resp.is_success:
+        return
+
+    detail = ""
+    try:
+        body = resp.json()
+        if isinstance(body, dict):
+            err = body.get("error")
+            if isinstance(err, dict):
+                detail = err.get("message") or ""
+            elif isinstance(err, str):
+                detail = err
+            detail = detail or body.get("message") or ""
+    except Exception:  # noqa: BLE001 — non-JSON error bodies exist
+        detail = resp.text[:300]
+
+    raise RuntimeError(
+        f"{provider} returned {resp.status_code}"
+        + (f": {detail.strip()}" if detail else "")
+    )
+
+
 def _to_data_url(image_bytes: bytes, content_type: str) -> str:
     b64 = base64.b64encode(image_bytes).decode("ascii")
     return f"data:{content_type};base64,{b64}"
@@ -364,7 +396,7 @@ class OpenAIProvider(LLMProvider):
         }
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(self.BASE_URL, json=payload, headers=self._headers())
-            resp.raise_for_status()
+            _raise_for_status(resp, "OpenAI")
         return _parse_response(resp.json()["choices"][0]["message"]["content"], boxes)
 
     async def equation_from_image(self, image_bytes: bytes, content_type: str) -> str:
@@ -381,7 +413,7 @@ class OpenAIProvider(LLMProvider):
         }
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(self.BASE_URL, json=payload, headers=self._headers())
-            resp.raise_for_status()
+            _raise_for_status(resp, "OpenAI")
         return _clean_latex(resp.json()["choices"][0]["message"]["content"])
 
     async def check_correctness(
@@ -402,7 +434,7 @@ class OpenAIProvider(LLMProvider):
         }
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(self.BASE_URL, json=payload, headers=self._headers())
-            resp.raise_for_status()
+            _raise_for_status(resp, "OpenAI")
         return _parse_correctness_response(resp.json()["choices"][0]["message"]["content"])
 
     async def complete(
@@ -423,7 +455,7 @@ class OpenAIProvider(LLMProvider):
         }
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(self.BASE_URL, json=payload, headers=self._headers())
-            resp.raise_for_status()
+            _raise_for_status(resp, "OpenAI")
         return resp.json()["choices"][0]["message"]["content"]
 
 
@@ -449,7 +481,7 @@ class ClaudeProvider(LLMProvider):
         }
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(self.BASE_URL, json=payload, headers=self._headers())
-            resp.raise_for_status()
+            _raise_for_status(resp, "Claude")
         return _parse_response(resp.json()["content"][0]["text"], boxes)
 
     async def equation_from_image(self, image_bytes: bytes, content_type: str) -> str:
@@ -465,7 +497,7 @@ class ClaudeProvider(LLMProvider):
         }
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(self.BASE_URL, json=payload, headers=self._headers())
-            resp.raise_for_status()
+            _raise_for_status(resp, "Claude")
         return _clean_latex(resp.json()["content"][0]["text"])
 
     async def check_correctness(
@@ -485,7 +517,7 @@ class ClaudeProvider(LLMProvider):
         }
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(self.BASE_URL, json=payload, headers=self._headers())
-            resp.raise_for_status()
+            _raise_for_status(resp, "Claude")
         return _parse_correctness_response(resp.json()["content"][0]["text"])
 
     async def complete(
@@ -505,7 +537,7 @@ class ClaudeProvider(LLMProvider):
         }
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(self.BASE_URL, json=payload, headers=self._headers())
-            resp.raise_for_status()
+            _raise_for_status(resp, "Claude")
         return resp.json()["content"][0]["text"]
 
 
