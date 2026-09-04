@@ -155,3 +155,26 @@ export interface StudentAssignment {
   earned: number | null
   max_score: number | null
 }
+
+export interface GradebookCell {
+  question_id: string
+  submission_id: string | null
+  status: string
+  released?: boolean
+  earned?: number
+  max?: number
+  needs_review_count?: number
+}
+
+export interface GradebookRow {
+  student_id: string
+  display_name: string
+  email: string
+  cells: GradebookCell[]
+}
+
+export interface Gradebook {
+  course_id: string
+  questions: { id: string; state: string; created_at: string }[]
+  rows: GradebookRow[]
+}
