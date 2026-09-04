@@ -426,3 +426,70 @@ def test_teacher_sees_all_submissions_student_sees_only_their_own(client, graded
         "/api/submissions", params={"question_id": question_id}
     ).json()
     assert [s["id"] for s in student_view] == [graded_setup["submission"].id]
+
+
+# ── Blank answers ───────────────────────────────────────────────────
+
+def _image(lines=(), bg="white", size=(900, 300)):
+    import io
+    from PIL import Image, ImageDraw, ImageFont
+
+    try:
+        font = ImageFont.truetype("/System/Library/Fonts/Supplemental/Arial.ttf", 40)
+    except Exception:
+        font = ImageFont.load_default()
+
+    im = Image.new("RGB", size, bg)
+    d = ImageDraw.Draw(im)
+    for i, line in enumerate(lines):
+        d.text((30, 20 + i * 70), line, fill="black", font=font)
+    buf = io.BytesIO()
+    im.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+@pytest.mark.parametrize("description,image,expected", [
+    ("pure white", _image(), True),
+    ("photographed grey", _image(bg="#d8d8d8"), True),
+    ("faint short answer", _image(["x = 3"]), False),
+    ("full working", _image(["2x + 4 = 10", "2x = 6", "x = 3"]), False),
+])
+def test_blank_detection(description, image, expected):
+    from services.grading import looks_blank
+
+    assert looks_blank(image) is expected, description
+
+
+@pytest.mark.asyncio
+async def test_blank_answer_scores_zero_without_calling_the_model():
+    """
+    A blank crop must never earn marks, and the model can't be trusted to
+    notice it's blank: shown the question and model answer for comparison,
+    a real 7B vision model reproduced them as the student's work and
+    awarded partial credit. So blankness is decided here, before any call.
+    """
+    provider = FakeProvider(["SCORE: 3\nFEEDBACK: nice working"])
+    item = AnswerToGrade(
+        answer_box_id="a1", label="a", max_score=5,
+        question_text="Solve 2x+4=10", ground_truth_text="x = 3",
+        crops=[(_image(), "image/png")],
+    )
+    result = await grade_one(provider, item)
+
+    assert result["score"] == 0.0
+    assert result["needs_manual_review"] is False  # unattempted is a real mark
+    assert provider.calls == []  # and costs nothing
+
+
+@pytest.mark.asyncio
+async def test_a_written_answer_still_reaches_the_model():
+    provider = FakeProvider(["SCORE: 4\nFEEDBACK: good"])
+    item = AnswerToGrade(
+        answer_box_id="a1", label="a", max_score=5,
+        question_text="Solve 2x+4=10", ground_truth_text="x = 3",
+        crops=[(_image(["2x = 6", "x = 3"]), "image/png")],
+    )
+    result = await grade_one(provider, item)
+
+    assert result["score"] == 4
+    assert len(provider.calls) == 1

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import re
+import io
 from dataclasses import dataclass, field
 
 from services.llm_provider import LLMProvider, extract_image_ids, extract_plain_text
@@ -31,20 +32,87 @@ logger = logging.getLogger(__name__)
 GRADING_SYSTEM_PROMPT = """You are marking a handwritten exam answer.
 
 You are given the question, the official model answer, and images of what \
-the student actually wrote. Award a mark out of the stated maximum.
+the student actually wrote.
 
-Mark the reasoning, not the handwriting. Award partial credit for work \
-that is correct as far as it goes. A different but mathematically valid \
-method earns full marks. Ignore untidiness, crossings-out and spelling.
+FIRST, transcribe exactly what appears in the student's images. Copy only \
+marks that are actually there. Do not complete, correct or infer any step. \
+If the images contain no writing at all, the transcript is NOTHING WRITTEN.
 
-If the images are unreadable, or show no attempt at all, say so rather \
-than guessing at a mark.
+THEN award a mark, based only on your own transcript.
+
+Never credit a step that does not appear in your transcript. The question \
+and model answer are given to you for comparison only — they are NOT the \
+student's work, and reproducing them as if the student wrote them is a \
+serious error.
+
+If the transcript is NOTHING WRITTEN, the score is 0.
+If there is writing but you cannot make it out, the score is UNREADABLE.
+
+Otherwise mark the reasoning, not the handwriting: award partial credit \
+for work that is correct as far as it goes, give full marks for a \
+different but mathematically valid method, and ignore untidiness, \
+crossings-out and spelling.
 
 Reply in exactly this format and nothing else:
 
+TRANSCRIPT: <what is actually written, or NOTHING WRITTEN>
 SCORE: <a number from 0 to the maximum, or UNREADABLE>
 FEEDBACK: <one or two sentences addressed to the student>
 """
+
+
+# Fraction of a crop that must be markedly darker than the paper before we
+# accept there is handwriting on it.
+#
+# Measured: a genuinely blank crop reads 0.0000% even when photographed
+# grey or full of scanner noise, while the faintest realistic answer — a
+# short pencil "x = 3" — reads 0.20%. The gap is three orders of
+# magnitude, so this sits far below the faintest writing rather than near
+# it. Erring the other way costs a student an unfair zero; erring this way
+# costs one wasted model call.
+BLANK_INK_FRACTION = 0.0002
+
+
+def looks_blank(image_bytes: bytes) -> bool:
+    """
+    Whether a crop has essentially no ink on it.
+
+    Asked here rather than of the model. Tested against a real 7B vision
+    model, a blank crop is not recognised as blank at all: shown the
+    question and model answer for comparison, it reproduces them as though
+    the student had written them and awards partial credit — inventing
+    marks for work that does not exist. Whether a region contains ink is a
+    question we can answer ourselves, exactly, so we do.
+
+    Compares against the crop's own paper tone rather than pure white, so a
+    grey photograph or a shadowed scan isn't read as covered in ink.
+    """
+    try:
+        from PIL import Image
+
+        img = Image.open(io.BytesIO(image_bytes)).convert("L")
+    except Exception:  # noqa: BLE001 — an unopenable crop isn't ours to judge
+        logger.warning("Could not inspect a crop for blankness; treating it as written on")
+        return False
+
+    # Trim the edge, which is usually the printed box border rather than
+    # anything the student wrote.
+    w, h = img.size
+    if w > 20 and h > 20:
+        m_x, m_y = int(w * 0.04), int(h * 0.04)
+        img = img.crop((m_x, m_y, w - m_x, h - m_y))
+
+    pixels = list(img.getdata())  # noqa: PIL deprecation — kept for Pillow <11 compat
+    if not pixels:
+        return True
+
+    # The paper's own tone, taken high enough up the distribution to ignore
+    # any writing present.
+    paper = sorted(pixels)[int(len(pixels) * 0.9)]
+    threshold = paper - 60
+    ink = sum(1 for p in pixels if p < threshold)
+
+    return (ink / len(pixels)) < BLANK_INK_FRACTION
 
 
 @dataclass
@@ -121,6 +189,13 @@ def question_text_by_ground_truth_box(content_doc: dict | None) -> dict[str, str
 
 _SCORE_RE = re.compile(r"SCORE:\s*(.+)", re.IGNORECASE)
 _FEEDBACK_RE = re.compile(r"FEEDBACK:\s*(.+)", re.IGNORECASE | re.DOTALL)
+_TRANSCRIPT_RE = re.compile(r"TRANSCRIPT:\s*(.*?)(?=\n\s*SCORE:|$)", re.IGNORECASE | re.DOTALL)
+
+# Phrasings a model reaches for when the page turns out to be empty.
+_NOTHING_WRITTEN = re.compile(
+    r"^\W*(nothing written|nothing|none|blank|empty|no writing|no answer|n/?a|-+)\W*$",
+    re.IGNORECASE,
+)
 
 
 def parse_grading_response(text: str, max_score: int) -> dict:
@@ -137,6 +212,20 @@ def parse_grading_response(text: str, max_score: int) -> dict:
     feedback = feedback_match.group(1).strip() if feedback_match else ""
     # FEEDBACK is last in the format, so strip anything the model added after.
     feedback = feedback.split("SCORE:")[0].strip()
+
+    # A blank page must never earn marks. Tested against a real model, it
+    # will happily "mark" an empty image by reproducing the model answer it
+    # was shown for comparison and describing it as the student's work, so
+    # the transcript is enforced here rather than trusted to the prompt.
+    transcript_match = _TRANSCRIPT_RE.search(raw)
+    transcript = transcript_match.group(1).strip() if transcript_match else None
+    if transcript is not None and (not transcript or _NOTHING_WRITTEN.match(transcript)):
+        return {
+            "score": 0.0,
+            "feedback": "Nothing was written in this answer box.",
+            "unreadable": False,
+            "parse_error": False,
+        }
 
     score_match = _SCORE_RE.search(raw)
     if not score_match:
@@ -203,6 +292,20 @@ async def grade_one(provider: LLMProvider, item: AnswerToGrade) -> dict:
             "score": None, "feedback": None, "raw": None,
             "needs_manual_review": True,
             "review_reason": "No extracted answer image for this box",
+        }
+
+    # Settle blankness before spending a model call on it — the model
+    # cannot be trusted to notice, and an unattempted answer is a real 0
+    # rather than something needing review. The teacher sees the crop
+    # beside this mark, so a misjudgement here is visible and one click to
+    # override.
+    if all(looks_blank(data) for data, _ in item.crops):
+        return {
+            "score": 0.0,
+            "feedback": "Nothing was written in this answer box.",
+            "raw": None,
+            "needs_manual_review": False,
+            "review_reason": None,
         }
 
     try:
