@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { AnswerKeyPreview } from '@/components/AnswerKeyPreview'
@@ -10,17 +10,25 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { apiFetch, apiFetchBlobUrl } from '@/lib/api'
 import { Input } from '@/components/ui/input'
-import { useFinalizeQuestion, useQuestion, useRenameQuestion, useSaveQuestion } from '@/lib/queries'
+import {
+  useCloneQuestion,
+  useFinalizeQuestion,
+  useQuestion,
+  useRenameQuestion,
+  useSaveQuestion,
+} from '@/lib/queries'
 import type { QuestionDocPayload } from '@/lib/types'
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
 
 export function QuestionEditorPage() {
   const { questionId = '' } = useParams()
+  const navigate = useNavigate()
   const { data: question, isLoading, error } = useQuestion(questionId)
   const save = useSaveQuestion(questionId)
   const finalize = useFinalizeQuestion(questionId)
   const rename = useRenameQuestion(questionId)
+  const clone = useCloneQuestion(questionId)
 
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const latest = useRef<QuestionDocPayload | null>(null)
@@ -71,6 +79,16 @@ export function QuestionEditorPage() {
       // Nothing further should be saved against this question now.
       latest.current = null
       toast.success('Finalized — the PDF is ready to print')
+    } catch (err) {
+      toast.error((err as Error).message)
+    }
+  }
+
+  const handleClone = async () => {
+    try {
+      const copy = await clone.mutateAsync()
+      toast.success('Copied to a new draft')
+      navigate(`/questions/${copy.question_id}`)
     } catch (err) {
       toast.error((err as Error).message)
     }
@@ -163,6 +181,11 @@ export function QuestionEditorPage() {
               <Button variant="outline" onClick={handleOpenPdf}>
                 Open PDF
               </Button>
+              {/* The only way to change a finalized paper: its layout and
+                  printed markers are frozen, so edits go into a fresh copy. */}
+              <Button variant="outline" onClick={handleClone} disabled={clone.isPending}>
+                {clone.isPending ? 'Copying…' : 'Edit as a new copy'}
+              </Button>
             </>
           ) : (
             <Button onClick={handleFinalize} disabled={finalize.isPending}>
@@ -175,7 +198,8 @@ export function QuestionEditorPage() {
       {!isFinalized && (
         <p className="text-sm text-muted-foreground">
           Finalizing freezes the layout and prints the alignment markers students' scans are
-          matched against. Edit before you finalize — afterwards you'll need to clone it.
+          matched against. You can still edit freely now; once finalized, changes go into a new
+          copy instead.
         </p>
       )}
 
