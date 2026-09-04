@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
+import { AnswerKeyPreview } from '@/components/AnswerKeyPreview'
 import { SubmissionsCard } from '@/components/SubmissionsCard'
 import QuestionEditor from '@/components/editor/QuestionEditor'
 import { Badge } from '@/components/ui/badge'
@@ -161,7 +162,9 @@ export function QuestionEditorPage() {
         </p>
       )}
 
-      {/* Submissions only exist once the paper is frozen and printable. */}
+      {/* Both only exist once the paper is frozen: finalize is what
+          renders the answer key and makes the paper printable. */}
+      {isFinalized && <AnswerKeyPreview questionId={questionId} enabled={isFinalized} />}
       {isFinalized && <SubmissionsCard questionId={questionId} />}
 
       <QuestionEditor

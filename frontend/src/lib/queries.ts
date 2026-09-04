@@ -6,6 +6,7 @@ import type {
   CourseSummary,
   EnrolledStudent,
   Me,
+  GroundTruthPreview,
   GroupedSubmission,
   Question,
   QuestionDocPayload,
@@ -211,5 +212,13 @@ export function useUploadSubmission(questionId: string) {
       })
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['submissions', questionId] }),
+  })
+}
+
+export function useGroundTruthPreviews(questionId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['ground-truth', questionId],
+    queryFn: () => apiFetch<GroundTruthPreview[]>(`/questions/${questionId}/ground-truth`),
+    enabled,
   })
 }
