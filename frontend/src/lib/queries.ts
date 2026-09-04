@@ -119,6 +119,21 @@ export function useSaveQuestion(questionId: string) {
   })
 }
 
+export function useRenameQuestion(questionId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (title: string) =>
+      apiFetch<Question>(`/questions/${questionId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ title }),
+      }),
+    onSuccess: (q) => {
+      qc.invalidateQueries({ queryKey: ['question', questionId] })
+      qc.invalidateQueries({ queryKey: ['questions', q.course_id] })
+    },
+  })
+}
+
 export function useFinalizeQuestion(questionId: string) {
   const qc = useQueryClient()
   return useMutation({

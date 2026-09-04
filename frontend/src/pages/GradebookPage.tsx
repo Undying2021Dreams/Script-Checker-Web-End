@@ -109,10 +109,7 @@ export function GradebookPage() {
                 <TableHead className="sticky left-0 bg-card">Student</TableHead>
                 {data.questions.map((q, i) => (
                   <TableHead key={q.id} className="whitespace-nowrap">
-                    Paper {i + 1}
-                    <span className="ml-1 font-mono text-[10px] font-normal text-muted-foreground">
-                      {q.id.slice(0, 6)}
-                    </span>
+                    {q.title || `Paper ${i + 1}`}
                   </TableHead>
                 ))}
                 <TableHead className="whitespace-nowrap">Total</TableHead>

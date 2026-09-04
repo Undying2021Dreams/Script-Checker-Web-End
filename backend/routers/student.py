@@ -63,6 +63,7 @@ def _to_assignment(q: Question, db: Session, user: User) -> StudentAssignment:
     return StudentAssignment(
         question_id=q.id,
         course_id=q.course_id,
+        title=q.title,
         total_marks=total_marks,
         page_count=q.page_count,
         finalized_at=q.finalized_at,

@@ -42,6 +42,7 @@ from security import get_current_user, require_teacher
 from schemas import (
     QuestionCreate,
     QuestionContentUpdate,
+    QuestionMetaUpdate,
     QuestionOut,
     AnswerBoxOut,
     GroundTruthBoxIn,
@@ -78,6 +79,7 @@ def _question_to_out(q: Question, db: Session | None = None) -> QuestionOut:
     return QuestionOut(
         question_id=q.id,
         course_id=q.course_id,
+        title=q.title,
         state=q.state,
         physical_page=q.physical_page,
         dpi=q.dpi,
@@ -339,6 +341,28 @@ def list_questions(
         .all()
     )
     return [_question_to_out(q, db=db) for q in questions]
+
+
+@router.patch("/{question_id}", response_model=QuestionOut)
+def update_question_meta(
+    question_id: str,
+    body: QuestionMetaUpdate,
+    user: User = Depends(require_teacher),
+    db: Session = Depends(get_db),
+):
+    """
+    Rename a paper.
+
+    Deliberately not part of the content autosave and not blocked by
+    _assert_draft: the title never reaches the printed page, so renaming a
+    finalized paper changes nothing a student has already been given.
+    """
+    q = _get_question_or_404(question_id, db, user)
+    title = (body.title or "").strip()
+    q.title = title or None
+    db.commit()
+    db.refresh(q)
+    return _question_to_out(q, db=db)
 
 
 @router.get("/{question_id}", response_model=QuestionOut)

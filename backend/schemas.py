@@ -68,6 +68,10 @@ class SubmissionSummary(BaseModel):
     needs_review_count: int | None
 
 
+class QuestionMetaUpdate(BaseModel):
+    title: str | None = Field(default=None, max_length=200)
+
+
 class StudentAssignment(BaseModel):
     """
     A paper as a student sees it.
@@ -79,6 +83,7 @@ class StudentAssignment(BaseModel):
 
     question_id: str
     course_id: str
+    title: str | None
     total_marks: int
     page_count: int | None
     finalized_at: datetime | None
@@ -171,6 +176,7 @@ class QuestionContentUpdate(BaseModel):
 class QuestionOut(BaseModel):
     question_id: str
     course_id: str
+    title: str | None = None
     state: str
     physical_page: str
     dpi: int
