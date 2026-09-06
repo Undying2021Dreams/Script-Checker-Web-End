@@ -8,7 +8,7 @@ import io
 import uuid
 from collections import defaultdict
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from sqlalchemy.orm import Session
 
 from config import settings
@@ -24,6 +24,7 @@ from schemas import (
 )
 from services.extractor import extract_page
 from routers.questions import _question_to_dict
+from ratelimit import HEAVY_CPU_LIMIT, limiter
 from security import get_current_user
 from services.grading_runner import submission_totals
 
@@ -179,7 +180,9 @@ def _clean_page_result(page_result: dict) -> dict:
 
 
 @router.post("", response_model=ExtractionResult)
+@limiter.limit(HEAVY_CPU_LIMIT)
 async def create_submission(
+    request: Request,
     question_id: str = Form(...),
     modality: str = Form(...),
     page_index: int = Form(0),

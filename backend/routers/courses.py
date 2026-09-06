@@ -1,6 +1,6 @@
 import secrets
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
@@ -13,6 +13,7 @@ from schemas import (
     EnrolledStudent,
     JoinRequest,
 )
+from ratelimit import JOIN_LIMIT, limiter
 from security import get_current_user, require_teacher
 
 router = APIRouter(prefix="/courses", tags=["courses"])
@@ -163,7 +164,9 @@ def search_courses(
 
 
 @router.post("/join", response_model=CourseOut)
+@limiter.limit(JOIN_LIMIT)
 def join_course(
+    request: Request,
     body: JoinRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),

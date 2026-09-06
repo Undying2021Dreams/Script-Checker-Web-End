@@ -28,7 +28,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
@@ -38,6 +38,7 @@ from models import (
     Question, AnswerBox, UploadedImage, QuestionPdf, GroundTruthBox,
     GroundTruthImage, QuestionImage, Course, User,
 )
+from ratelimit import HEAVY_CPU_LIMIT, LLM_LIMIT, limiter
 from security import get_current_user, require_teacher
 from schemas import (
     QuestionCreate,
@@ -423,7 +424,8 @@ async def upload_image(question_id: str, image: UploadFile = File(...), user: Us
 
 
 @router.post("/{question_id}/suggest-rubric")
-async def suggest_rubric(question_id: str, body: RubricSuggestRequest, user: User = Depends(require_teacher), db: Session = Depends(get_db)):
+@limiter.limit(LLM_LIMIT)
+async def suggest_rubric(request: Request, question_id: str, body: RubricSuggestRequest, user: User = Depends(require_teacher), db: Session = Depends(get_db)):
     """LLM proposes point values + rubric text per answer box — the teacher
     reviews and edits in the UI; nothing here is auto-applied to the DB."""
     q = _get_question_or_404(question_id, db, user)
@@ -477,7 +479,8 @@ async def equation_from_image(
 
 
 @router.post("/{question_id}/check-correctness")
-async def check_correctness(question_id: str, body: CorrectnessCheckRequest, user: User = Depends(require_teacher), db: Session = Depends(get_db)):
+@limiter.limit(LLM_LIMIT)
+async def check_correctness(request: Request, question_id: str, body: CorrectnessCheckRequest, user: User = Depends(require_teacher), db: Session = Depends(get_db)):
     """LLM sanity-checks each of this question's own ground truth answers
     against the specific sub-question it answers — catches a teacher's own
     mistakes (wrong answer key, ambiguous wording) before students see
@@ -720,7 +723,8 @@ def regenerate_ground_truth(question_id: str, user: User = Depends(require_teach
 
 
 @router.post("/{question_id}/finalize", response_model=QuestionOut)
-def finalize_question(question_id: str, user: User = Depends(require_teacher), db: Session = Depends(get_db)):
+@limiter.limit(HEAVY_CPU_LIMIT)
+def finalize_question(request: Request, question_id: str, user: User = Depends(require_teacher), db: Session = Depends(get_db)):
     """
     Freeze a draft question. Unlike the old canvas model, this now has real
     work to do: render the doc once, measure where each answer box actually
