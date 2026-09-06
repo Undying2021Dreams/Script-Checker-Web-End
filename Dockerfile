@@ -37,7 +37,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     # The renderer's browser runs beside the app, so it reads the app's
     # own static files directly rather than going out through ingress.
-    RENDER_BASE_URL=http://localhost:8000
+    RENDER_BASE_URL=http://localhost:8000 \
+    # Chromium is installed as root but the app runs as an unprivileged
+    # user, and Playwright looks for browsers under the *running* user's
+    # home cache. Without a shared path it installs to /root/.cache and
+    # is then invisible, so every PDF render fails with "Executable
+    # doesn't exist" — in the container only, never locally.
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 WORKDIR /app
 
@@ -54,8 +60,14 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt \
-    && python -m playwright install --with-deps chromium
+# The heavy wheels here (opencv, chromium) are big enough that a single
+# slow response from the index kills the whole build — which it did, on
+# a read timeout partway through. Retry rather than restart from
+# scratch, and split the two steps so a network failure in one doesn't
+# discard the layer the other already produced.
+RUN pip install --no-cache-dir --retries 5 --timeout 120 -r requirements.txt
+RUN python -m playwright install --with-deps chromium \
+    && chmod -R a+rX /ms-playwright
 
 COPY backend/ .
 
