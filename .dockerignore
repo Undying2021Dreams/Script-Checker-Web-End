@@ -1,0 +1,27 @@
+# Rebuilt inside the image; copying them in would be slow and would risk
+# shipping host-built binaries into a different platform.
+**/node_modules
+**/.venv
+**/dist
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+
+# Real configuration is passed as environment variables at run time.
+# Copying a .env into an image bakes credentials into a layer that
+# anyone who can pull the image can read back.
+**/.env
+**/.env.*
+!**/.env.example
+
+# Local data and test artefacts.
+**/uploads
+**/pdfs
+**/ground_truth_storage
+**/*.db
+**/*.sqlite*
+
+.git
+.gitignore
+**/.DS_Store
+*.log

@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+
+    # The tests run against a real Postgres rather than SQLite on
+    # purpose. Two bugs in this project were invisible under SQLite and
+    # only appeared on Postgres: an enum column added without its type,
+    # and crop rows written before the submission they reference —
+    # SQLite leaves foreign keys unenforced by default, so it accepted
+    # both.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: webend
+          POSTGRES_PASSWORD: webend_ci
+          POSTGRES_DB: webend_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql+psycopg2://webend:webend_ci@localhost:5432/webend_test
+      AZURE_CLIENT_ID: ci-placeholder
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      # pyzbar and pdf2image need native libraries; the extraction tests
+      # rasterise a real PDF, so poppler has to be present.
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends poppler-utils libzbar0 libgl1 libglib2.0-0
+
+      - name: Install Python dependencies
+        working-directory: backend
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Run tests
+        working-directory: backend
+        run: python -m pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        working-directory: frontend
+        run: npm ci
+
+      # Type errors are the failure mode that actually reaches this
+      # project — the build alone would let a bad prop shape through.
+      - name: Type-check
+        working-directory: frontend
+        run: npx tsc -b
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Built but not pushed: this only proves the image still builds, so
+      # a broken Dockerfile is caught here rather than at deploy time.
+      - name: Build image
+        run: docker build -t webend:ci .

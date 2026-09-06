@@ -1,7 +1,8 @@
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, FastAPI
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -53,3 +54,37 @@ app.include_router(api)
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# The built frontend, when there is one. Serving it from the same app
+# means a single container to deploy and no cross-origin requests at all
+# — the API is same-origin with the page that calls it. In development
+# this directory doesn't exist and Vite serves the frontend instead.
+_FRONTEND_DIST = Path(__file__).parent / "frontend_dist"
+
+if _FRONTEND_DIST.is_dir():
+    app.mount(
+        "/assets",
+        StaticFiles(directory=_FRONTEND_DIST / "assets"),
+        name="frontend-assets",
+    )
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def spa(full_path: str):
+        """
+        Hand any unmatched path to the single-page app.
+
+        Client-side routes like /courses/<id> are real URLs a user can
+        reload or link to, but they exist only in the browser — the
+        server has no such file, so without this a refresh would 404.
+        Registered last so it can't shadow the API or /health, and it
+        still returns a real 404 for anything under /api that doesn't
+        exist rather than answering with HTML.
+        """
+        if full_path.startswith("api/"):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+
+        candidate = _FRONTEND_DIST / full_path
+        if full_path and candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(_FRONTEND_DIST / "index.html")
