@@ -56,7 +56,7 @@ from qwen_vl_utils import process_vision_info
 # Staying within Qwen matters beyond quality: process_vision_info below
 # is Qwen's own helper. A model from another family (Llama 4, MiniCPM,
 # Pixtral) needs its own message-preparation code, not just a new id.
-MODEL_ID = "Qwen/Qwen2.5-VL-7B-Instruct"
+MODEL_ID = "Qwen/Qwen3-VL-8B-Instruct"
 
 quant_config = BitsAndBytesConfig(
     load_in_4bit=True,
@@ -190,7 +190,13 @@ def health():
 NGROK_AUTHTOKEN = "PASTE_YOUR_NGROK_AUTHTOKEN_HERE"
 ngrok.set_auth_token(NGROK_AUTHTOKEN)
 
-tunnel = ngrok.connect(8000)
+# Pin the account's reserved domain rather than taking a random one.
+# ngrok's free tier includes one permanent domain (dashboard -> Domains);
+# with it pinned the URL never changes, so SELF_HOSTED_LLM_URL survives
+# every restart of this notebook — without it, a deployed instance breaks
+# each time the tunnel is re-established.
+NGROK_DOMAIN = ""  # e.g. "your-name.ngrok-free.dev"; blank = random URL
+tunnel = ngrok.connect(8000, domain=NGROK_DOMAIN) if NGROK_DOMAIN else ngrok.connect(8000)
 print("=" * 70)
 print(f"Public URL — put this in backend/.env as SELF_HOSTED_LLM_URL:")
 print(f"  {tunnel.public_url}")

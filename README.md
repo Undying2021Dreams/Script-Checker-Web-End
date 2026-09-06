@@ -111,9 +111,14 @@ URL in `SELF_HOSTED_LLM_URL`. `MODEL_ID` near the top is the only thing
 to change to swap models, and the comment there says what fits on which
 Kaggle accelerator.
 
-Be aware the tunnel URL changes every time the notebook restarts, and
-Kaggle sessions expire — fine for development, not something a deployed
-instance can depend on staying up.
+Set `NGROK_DOMAIN` in the notebook to a reserved ngrok domain (the free
+tier includes one permanent domain, under Domains in the ngrok
+dashboard). The tunnel URL is then fixed, so `SELF_HOSTED_LLM_URL`
+survives every restart; left blank, ngrok assigns a random URL that has
+to be copied across again each time.
+
+Kaggle sessions still expire, so a notebook is fine for development but
+not something a deployed instance can depend on staying up.
 
 Be aware that hosted-provider costs are billed by that provider and are
 outside any cloud spending cap you may have set. If you deploy this
