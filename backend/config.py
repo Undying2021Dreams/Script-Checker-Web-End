@@ -15,6 +15,15 @@ class Settings(BaseSettings):
 
     # Public URLs / browser access
     PUBLIC_BASE_URL: str = "http://localhost:8000"
+
+    # Where the PDF renderer's headless browser fetches vendored KaTeX
+    # from. Deliberately separate from PUBLIC_BASE_URL: in a container
+    # that's the public HTTPS address, so rendering would leave the
+    # container, cross the internet and come back through the load
+    # balancer just to read its own static files — slow, and broken
+    # entirely before ingress is up. The browser runs beside the app, so
+    # it should talk to it directly.
+    RENDER_BASE_URL: str = "http://localhost:8000"
     FRONTEND_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     # Microsoft Entra ID (Azure AD) — "Sign in with Microsoft".
@@ -81,6 +90,10 @@ class Settings(BaseSettings):
     @property
     def public_base_url(self) -> str:
         return self.PUBLIC_BASE_URL.rstrip("/")
+
+    @property
+    def render_base_url(self) -> str:
+        return self.RENDER_BASE_URL.rstrip("/")
 
     @property
     def frontend_origins(self) -> list[str]:

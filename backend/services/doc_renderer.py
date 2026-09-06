@@ -42,9 +42,9 @@ logger = logging.getLogger(__name__)
 # with zero internet access. Playwright fetches these over loopback
 # (settings.public_base_url), not out to the real internet, so this
 # works identically whether the machine is offline or not.
-KATEX_CSS = f"{settings.public_base_url}/static/katex/katex.min.css"
-KATEX_JS = f"{settings.public_base_url}/static/katex/katex.min.js"
-KATEX_AUTORENDER = f"{settings.public_base_url}/static/katex/contrib/auto-render.min.js"
+KATEX_CSS = f"{settings.render_base_url}/static/katex/katex.min.css"
+KATEX_JS = f"{settings.render_base_url}/static/katex/katex.min.js"
+KATEX_AUTORENDER = f"{settings.render_base_url}/static/katex/contrib/auto-render.min.js"
 
 ARUCO_DICT_ID = getattr(cv2.aruco, settings.ARUCO_DICT, cv2.aruco.DICT_4X4_50)
 ARUCO_DICT = cv2.aruco.getPredefinedDictionary(ARUCO_DICT_ID)
