@@ -3,21 +3,21 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
+from slowapi.middleware import SlowAPIMiddleware
 
 from config import settings
+from ratelimit import limiter
 from models import User
 from routers import courses, grading, images, questions, student, submissions
 from schemas import UserOut
 from security import get_current_user
 
-limiter = Limiter(key_func=get_remote_address)
-
 app = FastAPI(title="Web-End API")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

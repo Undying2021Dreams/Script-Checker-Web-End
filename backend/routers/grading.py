@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from database import SessionLocal, get_db
@@ -14,6 +14,7 @@ from schemas import (
     GradeRunRequest,
     SubmissionGradesOut,
 )
+from ratelimit import BULK_LLM_LIMIT, LLM_LIMIT, limiter
 from security import get_current_user
 from services.grading_runner import grade_submission, submission_totals
 from services.llm_provider import get_provider
@@ -104,7 +105,9 @@ async def _grade_in_background(submission_id: str, provider_name: str) -> None:
 
 
 @router.post("/submissions/{submission_id}/grade", response_model=SubmissionGradesOut)
+@limiter.limit(LLM_LIMIT)
 def run_grading(
+    request: Request,
     submission_id: str,
     body: GradeRunRequest,
     background: BackgroundTasks,
@@ -179,7 +182,9 @@ async def _grade_many_in_background(submission_ids: list[str], provider_name: st
 
 
 @router.post("/questions/{question_id}/grade-all", response_model=BulkGradeStarted)
+@limiter.limit(BULK_LLM_LIMIT)
 def grade_all_submissions(
+    request: Request,
     question_id: str,
     body: BulkGradeRequest,
     background: BackgroundTasks,
