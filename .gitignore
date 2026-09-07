@@ -39,3 +39,6 @@ backend/ground_truth_storage/
 
 # ── Logs ────────────────────────────────────────────────────────────
 *.log
+
+# The self-hosted model notebook is kept out of the repo deliberately.
+kaggle_self_hosted_llm.py

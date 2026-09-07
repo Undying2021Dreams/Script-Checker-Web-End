@@ -104,21 +104,11 @@ Grading and the authoring helpers work with Gemini, OpenAI, Claude, or a
 self-hosted open-source model exposing an OpenAI-compatible endpoint.
 Configure whichever you want in `backend/.env`.
 
-`kaggle_self_hosted_llm.py` runs the self-hosted option as a Kaggle
-notebook: a vision-language model behind an OpenAI-compatible
-`/chat/completions` endpoint, tunnelled out with ngrok. Put the printed
-URL in `SELF_HOSTED_LLM_URL`. `MODEL_ID` near the top is the only thing
-to change to swap models, and the comment there says what fits on which
-Kaggle accelerator.
-
-Set `NGROK_DOMAIN` in the notebook to a reserved ngrok domain (the free
-tier includes one permanent domain, under Domains in the ngrok
-dashboard). The tunnel URL is then fixed, so `SELF_HOSTED_LLM_URL`
-survives every restart; left blank, ngrok assigns a random URL that has
-to be copied across again each time.
-
-Kaggle sessions still expire, so a notebook is fine for development but
-not something a deployed instance can depend on staying up.
+The self-hosted option expects any endpoint speaking OpenAI's
+`/chat/completions`, so a vision-language model served from a notebook,
+a workstation or a rented GPU all work the same way — point
+`SELF_HOSTED_LLM_URL` at it. The notebook used during development is
+not included in this repository.
 
 Be aware that hosted-provider costs are billed by that provider and are
 outside any cloud spending cap you may have set. If you deploy this
