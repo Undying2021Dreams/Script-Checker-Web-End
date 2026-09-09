@@ -15,6 +15,7 @@ import {
   useSubmissionGrades,
 } from '@/lib/queries'
 import type { AnswerGrade, GroupedAnswerBox } from '@/lib/types'
+import { MathText } from '@/components/MathText'
 
 const PROVIDERS = [
   { value: 'self_hosted', label: 'Self-hosted (free)' },
@@ -124,7 +125,11 @@ function GradeRow({
                 )}
               </p>
             )}
-            {grade.feedback && <p className="mt-1 text-muted-foreground">{grade.feedback}</p>}
+            {grade.feedback && (
+              <p className="mt-1 text-muted-foreground">
+                <MathText text={grade.feedback} />
+              </p>
+            )}
           </div>
         )}
 

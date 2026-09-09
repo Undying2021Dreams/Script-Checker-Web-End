@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useCheckAnswerKey, useSuggestRubric } from '@/lib/queries'
 import type { AnswerBox, CorrectnessResult, GroundTruthBox, RubricSuggestion } from '@/lib/types'
+import { MathText } from '@/components/MathText'
 
 const PROVIDERS = [
   { value: 'self_hosted', label: 'Self-hosted (free)' },
@@ -118,17 +119,21 @@ export function AnswerKeyCheck({
                 </Button>
               </div>
 
-              {r?.explanation && <p className="mt-1 text-muted-foreground">{r.explanation}</p>}
+              {r?.explanation && (
+                <p className="mt-1 text-muted-foreground">
+                  <MathText text={r.explanation} />
+                </p>
+              )}
               {r?.suggested_answer && (
                 <p className="mt-1">
                   <span className="text-muted-foreground">Suggested answer: </span>
-                  {r.suggested_answer}
+                  <MathText text={r.suggested_answer} />
                 </p>
               )}
               {r?.suggested_question && (
                 <p className="mt-1">
                   <span className="text-muted-foreground">Suggested question: </span>
-                  {r.suggested_question}
+                  <MathText text={r.suggested_question} />
                 </p>
               )}
             </div>
@@ -213,7 +218,11 @@ export function RubricSuggestions({
                   </span>
                   {changed && <Badge variant="outline">differs</Badge>}
                 </div>
-                {s.rubric && <p className="mt-1 text-muted-foreground">{s.rubric}</p>}
+                {s.rubric && (
+                  <p className="mt-1 text-muted-foreground">
+                    <MathText text={s.rubric} />
+                  </p>
+                )}
               </div>
             )
           })}
