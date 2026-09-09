@@ -5,7 +5,9 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { apiFetchBlobUrl } from '@/lib/api'
-import { useAssignments, useUploadSubmission } from '@/lib/queries'
+import { AuthedImage } from '@/components/AuthedImage'
+import { MathText } from '@/components/MathText'
+import { useAssignments, useSubmissionGrades, useUploadSubmission } from '@/lib/queries'
 import type { StudentAssignment } from '@/lib/types'
 
 function MarkOrStatus({ a }: { a: StudentAssignment }) {
@@ -26,6 +28,80 @@ function MarkOrStatus({ a }: { a: StudentAssignment }) {
   }
   return <Badge variant="outline">Submitted</Badge>
 }
+
+/**
+ * A student's own marks once the teacher has released them.
+ *
+ * The teacher's worked answer is shown beside each mark, not just the
+ * mark and a comment: a student who wants to understand why they lost
+ * two marks needs to see what the answer was meant to look like, and
+ * the marking scheme the teacher wrote sits in that same block.
+ */
+function MyResults({ submissionId }: { submissionId: string }) {
+  const [open, setOpen] = useState(false)
+  const { data, isLoading, error } = useSubmissionGrades(submissionId, open)
+
+  if (!open) {
+    return (
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+        See my marks and the solutions
+      </Button>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
+        Hide my marks
+      </Button>
+
+      {isLoading && <p className="text-sm text-muted-foreground">Loading your marks…</p>}
+      {error && <p className="text-sm text-destructive">{(error as Error).message}</p>}
+
+      {data?.grades.map((g) => (
+        <div key={g.answer_box_id} className="space-y-2 rounded-md border p-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm font-medium">
+              {g.label || `Part ${g.order_index + 1}`}
+            </span>
+            <Badge variant="secondary">
+              {g.score ?? '—'} / {g.max_score}
+            </Badge>
+          </div>
+
+          {g.feedback && (
+            <p className="text-sm text-muted-foreground">
+              <MathText text={g.feedback} />
+            </p>
+          )}
+
+          {(g.model_answer_images.length > 0 || g.model_answer_text) && (
+            <div className="space-y-2 border-t pt-2">
+              <p className="text-xs font-medium text-muted-foreground">
+                Your teacher's solution
+              </p>
+              {g.model_answer_images.length > 0 ? (
+                g.model_answer_images.map((url) => (
+                  <AuthedImage
+                    key={url}
+                    path={url.replace(/^\/api/, '')}
+                    alt="Teacher's worked solution"
+                    className="max-w-full rounded border bg-white"
+                  />
+                ))
+              ) : (
+                <p className="text-sm">
+                  <MathText text={g.model_answer_text ?? ''} />
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 
 function AssignmentRow({ assignment }: { assignment: StudentAssignment }) {
   const fileRef = useRef<HTMLInputElement>(null)
@@ -111,6 +187,10 @@ function AssignmentRow({ assignment }: { assignment: StudentAssignment }) {
         <p className="text-xs text-muted-foreground">
           Your teacher hasn't released marks for this yet.
         </p>
+      )}
+
+      {assignment.submission_id && assignment.released && (
+        <MyResults submissionId={assignment.submission_id} />
       )}
     </div>
   )

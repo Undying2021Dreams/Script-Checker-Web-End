@@ -1,11 +1,21 @@
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
 from database import SessionLocal, get_db
-from models import AnswerBox, AnswerGrade, Course, Enrollment, Question, Submission, User
+from models import (
+    AnswerBox,
+    AnswerGrade,
+    Course,
+    Enrollment,
+    GroundTruthBox,
+    GroundTruthImage,
+    Question,
+    Submission,
+    User,
+)
 from schemas import (
     AnswerGradeOut,
     BulkGradeStarted,
@@ -16,8 +26,9 @@ from schemas import (
 )
 from ratelimit import BULK_LLM_LIMIT, LLM_LIMIT, limiter
 from security import get_current_user
+from services.grading import pair_answer_boxes_with_ground_truth
 from services.grading_runner import grade_submission, submission_totals
-from services.llm_provider import get_provider
+from services.llm_provider import extract_plain_text, get_provider
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +51,44 @@ def _get_submission_for_teacher(submission_id: str, db: Session, user: User) -> 
     return sub
 
 
+def _model_answers_by_box(db: Session, sub: Submission) -> dict[str, tuple[str, list[str]]]:
+    """
+    answer_box_id -> (the teacher's worked answer, images of it).
+
+    Same pairing the grader used, so a student reads their mark beside
+    the answer it was actually judged against rather than whichever one
+    happens to sit nearest on the page.
+    """
+    question = db.query(Question).filter(Question.id == sub.question_id).first()
+    if question is None:
+        return {}
+
+    pairing = pair_answer_boxes_with_ground_truth(question.content)
+    gt_boxes = {b.id: b for b in question.ground_truth_boxes}
+
+    result: dict[str, tuple[str, list[str]]] = {}
+    for answer_box_id, gt_ids in pairing.items():
+        paired = [gt_boxes[gt_id] for gt_id in gt_ids if gt_id in gt_boxes]
+        if not paired:
+            continue
+
+        text = "\n\n".join(
+            t for t in (extract_plain_text(b.content or {}) for b in paired) if t.strip()
+        )
+        urls: list[str] = []
+        for gt_box in paired:
+            for img in (
+                db.query(GroundTruthImage)
+                .filter(GroundTruthImage.ground_truth_box_id == gt_box.id)
+                .order_by(GroundTruthImage.page_index)
+                .all()
+            ):
+                urls.append(f"/api/submissions/{sub.id}/model-answers/{img.id}")
+        result[answer_box_id] = (text, urls)
+
+    return result
+
+
 def _grades_payload(db: Session, sub: Submission, *, include_feedback: bool = True) -> SubmissionGradesOut:
     grades = (
         db.query(AnswerGrade, AnswerBox)
@@ -49,6 +98,7 @@ def _grades_payload(db: Session, sub: Submission, *, include_feedback: bool = Tr
         .all()
     )
     totals = submission_totals(db, sub.id)
+    model_answers = _model_answers_by_box(db, sub)
 
     return SubmissionGradesOut(
         submission_id=sub.id,
@@ -70,9 +120,13 @@ def _grades_payload(db: Session, sub: Submission, *, include_feedback: bool = Tr
                 llm_score=g.llm_score,
                 override_score=g.override_score,
                 feedback=(g.override_feedback or g.llm_feedback) if include_feedback else None,
+                llm_feedback=g.llm_feedback if include_feedback else None,
+                override_feedback=g.override_feedback if include_feedback else None,
                 provider=g.provider,
                 needs_manual_review=g.needs_manual_review,
                 review_reason=g.review_reason,
+                model_answer_text=model_answers.get(g.answer_box_id, ("", []))[0] or None,
+                model_answer_images=model_answers.get(g.answer_box_id, ("", []))[1],
             )
             for g, box in grades
         ],
@@ -271,6 +325,57 @@ def get_grades(
     return _grades_payload(db, sub)
 
 
+@router.get("/submissions/{submission_id}/model-answers/{image_id}")
+def get_model_answer_image(
+    submission_id: str,
+    image_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    A rendered image of the teacher's worked answer for one box.
+
+    Deliberately not served by the teacher-only route of the same images
+    in questions.py: this one is reachable by a student, so access is
+    tied to a submission whose marks have been released rather than to
+    the question, which is the answer key while the paper is still live.
+    """
+    sub = db.query(Submission).filter(Submission.id == submission_id).first()
+    if sub is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Submission not found")
+
+    if user.role != "admin":
+        question = db.query(Question).filter(Question.id == sub.question_id).first()
+        course = db.query(Course).filter(Course.id == question.course_id).first() if question else None
+        is_teacher = course is not None and course.teacher_id == user.id
+
+        if not is_teacher:
+            if sub.student_id != user.id:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "Submission not found")
+            if sub.released_at is None:
+                raise HTTPException(
+                    status.HTTP_403_FORBIDDEN,
+                    "Your marks for this submission haven't been released yet",
+                )
+
+    image = db.query(GroundTruthImage).filter(GroundTruthImage.id == image_id).first()
+    if image is None or not image.data:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Model answer image not found")
+
+    # The image must belong to this submission's own paper. Without this
+    # check the id alone would reach any model answer in the system, on
+    # any course, via a submission the caller does happen to own.
+    owning = (
+        db.query(GroundTruthBox)
+        .filter(GroundTruthBox.id == image.ground_truth_box_id)
+        .first()
+    )
+    if owning is None or owning.question_id != sub.question_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Model answer image not found")
+
+    return Response(content=bytes(image.data), media_type=image.content_type or "image/png")
+
+
 @router.patch("/submissions/{submission_id}/grades/{answer_box_id}", response_model=SubmissionGradesOut)
 def override_grade(
     submission_id: str,
@@ -303,7 +408,10 @@ def override_grade(
         )
 
     grade.override_score = body.score
-    grade.override_feedback = body.feedback
+    # An empty box means "no note of my own", not "a note that is the
+    # empty string" — stored as NULL so the model's feedback shows
+    # through rather than being masked by a blank.
+    grade.override_feedback = (body.feedback or "").strip() or None
     grade.overridden_by = user.id
     grade.overridden_at = datetime.now(timezone.utc)
     # A human has looked at it, so it's no longer waiting on one.

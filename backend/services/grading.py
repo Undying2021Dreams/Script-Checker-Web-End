@@ -141,36 +141,73 @@ class AnswerToGrade:
     blocked_reason: str | None = None
 
 
-def pair_answer_boxes_with_ground_truth(content_doc: dict | None) -> dict[str, str | None]:
+def pair_answer_boxes_with_ground_truth(content_doc: dict | None) -> dict[str, list[str]]:
     """
-    Map answer_box_id -> ground_truth_box_id, by document order.
+    Map answer_box_id -> the model answers it is marked against.
 
-    Each answerBox is paired with the next groundTruthBox that follows it,
-    since the model answer is authored after the space the student writes
-    in. An answerBox with no groundTruthBox after it maps to None — it
-    can't be auto-marked, and the caller flags it rather than guessing.
+    Which side of the answer space the model answer sits on is the
+    teacher's choice, and both orders occur. This reads the convention
+    off the document instead of assuming one: whichever of the two node
+    types comes first sets it for the whole document, which is safe
+    because a teacher lays a paper out one way throughout.
+
+    The list can hold more than one id. A paper that states several
+    sub-questions, each with its own model answer, and then leaves a
+    single box for the working covers all of them — so the box is marked
+    against all of them rather than only the nearest.
+
+    An answer box with no model answer at all maps to an empty list; the
+    caller flags it for a human rather than guessing at a mark.
     """
-    pairing: dict[str, str | None] = {}
+    pairing: dict[str, list[str]] = {}
     if not isinstance(content_doc, dict):
         return pairing
 
-    pending: list[str] = []
+    sequence: list[tuple[str, str]] = []
     for node in content_doc.get("content", []) or []:
         node_type = node.get("type")
-        attrs = node.get("attrs") or {}
+        if node_type not in ("answerBox", "groundTruthBox"):
+            continue
+        node_id = (node.get("attrs") or {}).get("id")
+        if node_id:
+            sequence.append(("answer" if node_type == "answerBox" else "truth", node_id))
 
-        if node_type == "answerBox":
-            if attrs.get("id"):
-                pending.append(attrs["id"])
-        elif node_type == "groundTruthBox":
-            gt_id = attrs.get("id")
-            for answer_box_id in pending:
-                pairing[answer_box_id] = gt_id
-            pending = []
+    if not sequence:
+        return pairing
 
-    # Trailing answer boxes with no model answer after them.
-    for answer_box_id in pending:
-        pairing[answer_box_id] = None
+    # An earlier version paired every box with the model answer that
+    # *followed* it. The editor writes the model answer first, so on real
+    # papers every box paired with the answer to the question after it —
+    # or, for the last box, with nothing at all. Marks came back attached
+    # to the wrong questions.
+    truth_leads = sequence[0][0] == "truth"
+
+    pending: list[str] = []
+    if truth_leads:
+        # Model answers accumulate until a box closes the group: several
+        # sub-questions can share the one box left for the working.
+        for kind, node_id in sequence:
+            if kind == "truth":
+                pending.append(node_id)
+            else:
+                pairing[node_id] = pending
+                pending = []
+    else:
+        # The mirror image: boxes accumulate until the model answer they
+        # are all marked against, as with parts (i) and (ii) of one
+        # question sharing a single answer.
+        for kind, node_id in sequence:
+            if kind == "answer":
+                pending.append(node_id)
+            else:
+                for answer_id in pending:
+                    pairing[answer_id] = [node_id]
+                pending = []
+
+    # Boxes reached before any model answer keep their empty list.
+    for kind, node_id in sequence:
+        if kind == "answer":
+            pairing.setdefault(node_id, [])
 
     return pairing
 

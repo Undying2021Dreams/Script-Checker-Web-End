@@ -158,8 +158,9 @@ export function useFinalizeQuestion(questionId: string) {
 
 // ── Grading ─────────────────────────────────────────────────────────
 
-export function useSubmissionGrades(submissionId: string) {
+export function useSubmissionGrades(submissionId: string, enabled = true) {
   return useQuery({
+    enabled,
     queryKey: ['grades', submissionId],
     queryFn: () => apiFetch<SubmissionGrades>(`/submissions/${submissionId}/grades`),
     // Grading runs in the background, so keep polling while a run is in

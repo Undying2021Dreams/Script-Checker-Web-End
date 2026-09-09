@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
@@ -52,14 +52,35 @@ function GradeRow({
   onOverride: (score: number | null, feedback: string) => Promise<void>
   disabled: boolean
 }) {
-  const [score, setScore] = useState<string>(grade?.override_score?.toString() ?? '')
-  const [feedback, setFeedback] = useState<string>('')
+  // Seeded from whatever already stands for this box: the teacher's own
+  // mark if they have set one, otherwise the model's proposal, so a
+  // teacher adjusts what is there instead of retyping it.
+  //
+  // These are re-seeded whenever the saved values change, because the
+  // grades arrive after this row first renders — a plain useState
+  // initialiser captured the empty state and the fields stayed blank
+  // even once a mark existed. `dirty` keeps a re-seed from overwriting
+  // edits in progress, which a bare useEffect would do on every poll
+  // while a grading run is live.
+  const savedScore = grade?.override_score ?? grade?.llm_score ?? null
+  const savedFeedback = grade?.override_feedback ?? grade?.llm_feedback ?? ''
+
+  const [score, setScore] = useState<string>(savedScore?.toString() ?? '')
+  const [feedback, setFeedback] = useState<string>(savedFeedback)
+  const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (dirty) return
+    setScore(savedScore?.toString() ?? '')
+    setFeedback(savedFeedback)
+  }, [savedScore, savedFeedback, dirty])
 
   const save = async () => {
     setSaving(true)
     try {
       await onOverride(score.trim() === '' ? null : Number(score), feedback)
+      setDirty(false)
       toast.success(`Saved mark for ${box.label || 'this part'}`)
     } catch (err) {
       toast.error((err as Error).message)
@@ -138,14 +159,23 @@ function GradeRow({
             <label className="text-xs text-muted-foreground">Your mark</label>
             <Input
               value={score}
-              onChange={(e) => setScore(e.target.value)}
+              onChange={(e) => {
+                setDirty(true)
+                setScore(e.target.value)
+              }}
               placeholder={grade?.llm_score?.toString() ?? '—'}
               inputMode="decimal"
             />
           </div>
           <div className="min-w-48 flex-1">
             <label className="text-xs text-muted-foreground">Your feedback (optional)</label>
-            <Input value={feedback} onChange={(e) => setFeedback(e.target.value)} />
+            <Input
+              value={feedback}
+              onChange={(e) => {
+                setDirty(true)
+                setFeedback(e.target.value)
+              }}
+            />
           </div>
           <Button variant="outline" onClick={save} disabled={disabled || saving}>
             {saving ? 'Saving…' : 'Save mark'}

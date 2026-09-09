@@ -75,9 +75,13 @@ export interface AnswerGrade {
   llm_score: number | null
   override_score: number | null
   feedback: string | null
+  llm_feedback: string | null
+  override_feedback: string | null
   provider: string | null
   needs_manual_review: boolean
   review_reason: string | null
+  model_answer_text: string | null
+  model_answer_images: string[]
 }
 
 export interface SubmissionGrades {

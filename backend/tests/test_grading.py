@@ -65,23 +65,49 @@ def _truth(box_id):
     return {"type": "groundTruthBox", "attrs": {"id": box_id}}
 
 
-def test_pairs_each_answer_box_with_the_following_model_answer():
+def test_pairs_each_answer_box_with_the_model_answer_above_it():
+    # The order the editor actually produces: the teacher writes the
+    # model answer, then leaves a box under it for the student.
+    doc = _doc(
+        _para("Q1"), _truth("g1"), _answer("a1"),
+        _para("Q2"), _truth("g2"), _answer("a2"),
+    )
+    assert pair_answer_boxes_with_ground_truth(doc) == {"a1": ["g1"], "a2": ["g2"]}
+
+
+def test_one_box_covering_several_sub_questions_is_marked_against_all_of_them():
+    # A real paper from this project: two sub-questions, each with its own
+    # model answer and marking scheme, and a single box at the end for all
+    # the working. Marking it against only the nearest answer would judge
+    # the student's work against the wrong question.
+    doc = _doc(
+        _para("Q1"), _truth("g1"),
+        _para("Q2"), _truth("g2"),
+        _answer("a1"),
+    )
+    assert pair_answer_boxes_with_ground_truth(doc) == {"a1": ["g1", "g2"]}
+
+
+def test_pairs_each_answer_box_with_the_model_answer_below_it():
+    # The mirror convention. Which one a paper uses is read off the
+    # document rather than assumed, since a teacher may lay it out either
+    # way and does so consistently within one paper.
     doc = _doc(
         _para("Q1"), _answer("a1"), _truth("g1"),
         _para("Q2"), _answer("a2"), _truth("g2"),
     )
-    assert pair_answer_boxes_with_ground_truth(doc) == {"a1": "g1", "a2": "g2"}
+    assert pair_answer_boxes_with_ground_truth(doc) == {"a1": ["g1"], "a2": ["g2"]}
 
 
 def test_multiple_answer_boxes_share_one_model_answer():
     # A sub-question with parts (i) and (ii) marked against one answer.
     doc = _doc(_para("Q1"), _answer("a1"), _answer("a2"), _truth("g1"))
-    assert pair_answer_boxes_with_ground_truth(doc) == {"a1": "g1", "a2": "g1"}
+    assert pair_answer_boxes_with_ground_truth(doc) == {"a1": ["g1"], "a2": ["g1"]}
 
 
 def test_trailing_answer_box_has_no_model_answer():
     doc = _doc(_para("Q1"), _answer("a1"), _truth("g1"), _para("Q2"), _answer("a2"))
-    assert pair_answer_boxes_with_ground_truth(doc) == {"a1": "g1", "a2": None}
+    assert pair_answer_boxes_with_ground_truth(doc) == {"a1": ["g1"], "a2": []}
 
 
 def test_pairing_survives_a_missing_document():
@@ -633,3 +659,80 @@ def test_a_successful_response_is_left_alone():
     from services.llm_provider import _raise_for_status
 
     _raise_for_status(httpx.Response(200, json={}, request=httpx.Request("POST", "https://x")), "Claude")
+
+
+# ── A teacher's mark outranks the machine's ─────────────────────────
+
+def test_regrading_leaves_a_teachers_mark_and_words_alone(client, graded_setup, monkeypatch):
+    """
+    Re-running the model must not quietly undo a human decision.
+
+    The two are stored in separate columns precisely so this can hold;
+    this asserts the behaviour a teacher actually depends on, which is
+    that re-grading a paper they have already marked by hand changes
+    nothing they wrote.
+    """
+    teacher = graded_setup["teacher"]
+    sub = graded_setup["submission"]
+
+    _use_fake_provider(monkeypatch, ["SCORE: 2\nFEEDBACK: model's first take"] * 2)
+    _grade(client, teacher, sub.id)
+
+    client.as_user(teacher).patch(
+        f"/api/submissions/{sub.id}/grades/a1",
+        json={"score": 5, "feedback": "Method is right, arithmetic slipped."},
+    )
+
+    _use_fake_provider(monkeypatch, ["SCORE: 1\nFEEDBACK: model's second take"] * 2)
+    body = _grade(client, teacher, sub.id).json()
+
+    marked = next(g for g in body["grades"] if g["answer_box_id"] == "a1")
+    assert marked["override_score"] == 5
+    assert marked["override_feedback"] == "Method is right, arithmetic slipped."
+    assert marked["score"] == 5, "the teacher's mark is the one that counts"
+    assert marked["feedback"] == "Method is right, arithmetic slipped."
+    # The model's newer opinion is still recorded alongside, so a
+    # disputed mark can be traced.
+    assert marked["llm_score"] == 1
+
+    untouched = next(g for g in body["grades"] if g["answer_box_id"] == "a2")
+    assert untouched["score"] == 1, "a box with no override still follows the model"
+
+
+def test_blank_feedback_does_not_mask_the_models(client, graded_setup, monkeypatch):
+    """Clearing the note falls back to the model's rather than showing nothing."""
+    teacher = graded_setup["teacher"]
+    sub = graded_setup["submission"]
+
+    _use_fake_provider(monkeypatch, ["SCORE: 2\nFEEDBACK: check your signs"] * 2)
+    _grade(client, teacher, sub.id)
+
+    client.as_user(teacher).patch(
+        f"/api/submissions/{sub.id}/grades/a1", json={"score": 4, "feedback": "   "}
+    )
+    body = client.as_user(teacher).get(f"/api/submissions/{sub.id}/grades").json()
+    marked = next(g for g in body["grades"] if g["answer_box_id"] == "a1")
+
+    assert marked["override_feedback"] is None
+    assert marked["feedback"] == "check your signs"
+
+
+# ── The worked solution reaches the student, but only after release ──
+
+def test_model_answer_is_withheld_until_marks_are_released(client, graded_setup, monkeypatch):
+    teacher = graded_setup["teacher"]
+    student = graded_setup["student"]
+    sub = graded_setup["submission"]
+
+    _use_fake_provider(monkeypatch, ["SCORE: 3\nFEEDBACK: ok"] * 2)
+    _grade(client, teacher, sub.id)
+
+    # While the paper is still live the model answer is the answer key.
+    assert client.as_user(student).get(f"/api/submissions/{sub.id}/grades").status_code == 403
+
+    client.as_user(teacher).post(f"/api/submissions/{sub.id}/release")
+
+    body = client.as_user(student).get(f"/api/submissions/{sub.id}/grades").json()
+    marked = next(g for g in body["grades"] if g["answer_box_id"] == "a1")
+    assert marked["model_answer_text"] == "x = 3"
+    assert marked["feedback"] == "ok"

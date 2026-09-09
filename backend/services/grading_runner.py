@@ -60,17 +60,22 @@ def build_grading_items(db: Session, submission: Submission) -> list[AnswerToGra
 
     items: list[AnswerToGrade] = []
     for box in sorted(question.answer_boxes, key=lambda b: b.order_index):
-        gt_id = pairing.get(box.id)
-        gt_box: GroundTruthBox | None = gt_boxes.get(gt_id) if gt_id else None
+        gt_ids = [gt_id for gt_id in pairing.get(box.id, []) if gt_id in gt_boxes]
+        paired: list[GroundTruthBox] = [gt_boxes[gt_id] for gt_id in gt_ids]
 
         blocked = None
-        if gt_box is None:
+        if not paired:
             # Nothing to mark against. Recorded for a human rather than
             # guessed at — an invented mark is worse than an obvious gap.
             blocked = "No model answer is paired with this answer box"
 
+        # A box can be marked against several model answers at once, when
+        # the paper asks a few sub-questions and leaves one space for all
+        # the working. Their text and images are concatenated in document
+        # order so the marking scheme the teacher wrote for each part
+        # reaches the model with the part it belongs to.
         gt_images: list[tuple[bytes, str]] = []
-        if gt_box is not None:
+        for gt_box in paired:
             for img in (
                 db.query(GroundTruthImage)
                 .filter(GroundTruthImage.ground_truth_box_id == gt_box.id)
@@ -80,13 +85,24 @@ def build_grading_items(db: Session, submission: Submission) -> list[AnswerToGra
                 if img.data:
                     gt_images.append((bytes(img.data), img.content_type or "image/png"))
 
+        ground_truth_text = "\n\n".join(
+            text
+            for text in (extract_plain_text(gt_box.content or {}) for gt_box in paired)
+            if text.strip()
+        )
+        question_text = "\n\n".join(
+            text
+            for text in (question_text_by_gt.get(gt_id, "") for gt_id in gt_ids)
+            if text.strip()
+        )
+
         items.append(
             AnswerToGrade(
                 answer_box_id=box.id,
                 label=box.label or "",
                 max_score=box.points,
-                question_text=(question_text_by_gt.get(gt_id) if gt_id else "") or whole_paper_text,
-                ground_truth_text=extract_plain_text(gt_box.content or {}) if gt_box else "",
+                question_text=question_text or whole_paper_text,
+                ground_truth_text=ground_truth_text,
                 ground_truth_images=gt_images,
                 crops=[
                     (bytes(c.data), c.content_type or "image/png")
