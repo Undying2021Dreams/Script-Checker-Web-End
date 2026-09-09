@@ -173,7 +173,13 @@ One manual step remains, and sign-in fails without it:
   Entra portal -> App registrations -> Web-End -> Authentication
   add this Single-page application redirect URI:
 
-      https://$fqdn/auth/redirect
+      https://$fqdn/
+
+  The trailing slash matters, and the path is the site root rather than
+  a dedicated callback route: MSAL is configured with redirectUri '/'
+  (frontend/src/lib/msal.ts) and main.tsx detects the popup landing
+  there and hands the response back over a BroadcastChannel instead of
+  mounting the app a second time.
 
 EOF
 }
