@@ -47,6 +47,12 @@ AZURE_CLIENT_ID="${AZURE_CLIENT_ID:-08409bfc-af77-447a-9389-3466a29ea9dd}"
 AZURE_TENANT_ID="${AZURE_TENANT_ID:-common}"
 TEACHER_EMAILS="${TEACHER_EMAILS:-2105025@ugrad.cse.buet.ac.bd}"
 
+# The self-hosted model runs in a Kaggle notebook behind an ngrok tunnel,
+# and the tunnel takes a fresh address every time that notebook restarts.
+# So this is passed in rather than pinned:
+#   SELF_HOSTED_LLM_URL=https://xxxx.ngrok-free.dev ./deploy/azure.sh deploy
+SELF_HOSTED_LLM_URL="${SELF_HOSTED_LLM_URL:-}"
+
 # Generated on first `up` and read back on every later run. Kept out of
 # git (see .gitignore) — it holds the database password.
 SECRETS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.azure-secrets"
@@ -169,6 +175,13 @@ cmd_deploy() {
   fqdn="$(az containerapp show -g "$RG" -n "$APP_NAME" --query properties.configuration.ingress.fqdn -o tsv)"
   az containerapp update -g "$RG" -n "$APP_NAME" \
     --set-env-vars "PUBLIC_BASE_URL=https://$fqdn" "FRONTEND_ORIGINS=https://$fqdn" -o none
+
+  # Left untouched when empty, so a plain redeploy does not wipe an
+  # address that was set by an earlier run.
+  if [ -n "$SELF_HOSTED_LLM_URL" ]; then
+    az containerapp update -g "$RG" -n "$APP_NAME" \
+      --set-env-vars "SELF_HOSTED_LLM_URL=$SELF_HOSTED_LLM_URL" -o none
+  fi
 
   log "Deployed: https://$fqdn"
   cat <<EOF
