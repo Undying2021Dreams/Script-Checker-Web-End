@@ -111,8 +111,13 @@ EOF
     -g "$RG" -n "$PG_NAME" --rule-name allow-azure \
     --start-ip-address 0.0.0.0 --end-ip-address 0.0.0.0 -o none 2>/dev/null || true
 
+  # -n is the *database* name here and -s the server; there is no -d.
+  # Getting that wrong fails the argument parser rather than the API, so
+  # with stderr discarded it looked exactly like the idempotent
+  # "already exists" case — the database was silently never created and
+  # the app crash-looped on "database webend does not exist".
   az postgres flexible-server db create \
-    -g "$RG" -s "$PG_NAME" -d webend -o none 2>/dev/null || true
+    -g "$RG" -s "$PG_NAME" -n webend -o none 2>&1 | grep -v "already exists" || true
 
   log "Container Apps environment $ENV_NAME ($APP_LOC)"
   if ! az containerapp env show -g "$RG" -n "$ENV_NAME" -o none 2>/dev/null; then
