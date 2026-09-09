@@ -20,6 +20,12 @@ os.environ.setdefault(
 )
 os.environ.setdefault("AZURE_CLIENT_ID", "test-client-id")
 
+# doc_renderer builds its KaTeX URLs from RENDER_BASE_URL at import time,
+# so the address has to be fixed before `config` is imported — hence a
+# chosen port here rather than an ephemeral one. `_render_server` below
+# is what actually listens on it.
+os.environ.setdefault("RENDER_BASE_URL", "http://127.0.0.1:8931")
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest  # noqa: E402
@@ -29,6 +35,47 @@ from database import Base, SessionLocal, engine  # noqa: E402
 from main import app  # noqa: E402
 from models import User  # noqa: E402
 from security import get_current_user  # noqa: E402
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _render_server():
+    """
+    Serve the app's static files for the PDF renderer's browser.
+
+    doc_renderer fetches vendored KaTeX over HTTP from RENDER_BASE_URL —
+    in the container the app serves those files to itself. Under pytest
+    nothing listens there unless we start it, and when the fetch fails
+    `renderMathInElement` is undefined and every render dies.
+
+    Without this the render tests passed on a developer machine only
+    because a dev server happened to be running on :8000, and failed in
+    CI, where nothing was. A test that depends on a process nobody
+    started is a test that reports the wrong answer in both directions.
+    """
+    import threading
+    import time
+
+    import uvicorn
+
+    from config import settings
+
+    port = int(settings.render_base_url.rsplit(":", 1)[1])
+    server = uvicorn.Server(
+        uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
+    )
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+
+    deadline = time.time() + 30
+    while not server.started and time.time() < deadline:
+        time.sleep(0.05)
+    if not server.started:
+        raise RuntimeError(f"render server did not start on port {port}")
+
+    yield
+
+    server.should_exit = True
+    thread.join(timeout=10)
 
 
 @pytest.fixture(scope="session", autouse=True)

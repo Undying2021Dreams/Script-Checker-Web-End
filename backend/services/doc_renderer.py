@@ -46,6 +46,28 @@ KATEX_CSS = f"{settings.render_base_url}/static/katex/katex.min.css"
 KATEX_JS = f"{settings.render_base_url}/static/katex/katex.min.js"
 KATEX_AUTORENDER = f"{settings.render_base_url}/static/katex/contrib/auto-render.min.js"
 
+
+def _await_render(page) -> None:
+    """
+    Wait for a rendered page's own scripts to finish.
+
+    `window.__ready` is now set even when KaTeX throws, so this can tell
+    the two failures apart. Previously a KaTeX that never loaded left the
+    flag unset and surfaced fifteen seconds later as "Timeout 15000ms
+    exceeded" — which says nothing about the cause, and cost a CI
+    investigation to trace back to a static file the browser could not
+    reach.
+    """
+    page.wait_for_function("window.__ready === true", timeout=15000)
+    error = page.evaluate("window.__katexError || null")
+    if error:
+        raise RuntimeError(
+            f"KaTeX did not run ({error}). It was expected at {KATEX_JS}; "
+            "the app serves it from backend/static, so check that "
+            "RENDER_BASE_URL points at a reachable instance of this app."
+        )
+
+
 ARUCO_DICT_ID = getattr(cv2.aruco, settings.ARUCO_DICT, cv2.aruco.DICT_4X4_50)
 ARUCO_DICT = cv2.aruco.getPredefinedDictionary(ARUCO_DICT_ID)
 CORNER_MARKER_IDS = [0, 1, 2, 3]  # TL, TR, BL, BR
@@ -249,10 +271,14 @@ ul,ol{{margin:0 0 10px 22px}}
 <script src="{katex_js}"></script>
 <script src="{katex_autorender}"></script>
 <script>
-renderMathInElement(document.body, {{delimiters:[
-  {{left:"\\\\(", right:"\\\\)", display:false}},
-  {{left:"\\\\[", right:"\\\\]", display:true}}
-]}});
+try {{
+  renderMathInElement(document.body, {{delimiters:[
+    {{left:"\\\\(", right:"\\\\)", display:false}},
+    {{left:"\\\\[", right:"\\\\]", display:true}}
+  ]}});
+}} catch (e) {{
+  window.__katexError = String(e);
+}}
 window.__ready = true;
 </script></body></html>"""
 
@@ -332,10 +358,14 @@ ul,ol{{margin:0 0 12px 24px}}
 <script src="{KATEX_JS}"></script>
 <script src="{KATEX_AUTORENDER}"></script>
 <script>
-renderMathInElement(document.body, {{delimiters:[
-  {{left:"\\\\(", right:"\\\\)", display:false}},
-  {{left:"\\\\[", right:"\\\\]", display:true}}
-]}});
+try {{
+  renderMathInElement(document.body, {{delimiters:[
+    {{left:"\\\\(", right:"\\\\)", display:false}},
+    {{left:"\\\\[", right:"\\\\]", display:true}}
+  ]}});
+}} catch (e) {{
+  window.__katexError = String(e);
+}}
 window.__ready = true;
 </script></body></html>"""
 
@@ -348,7 +378,7 @@ window.__ready = true;
             device_scale_factor=settings.LLM_IMAGE_SCALE_FACTOR,
         )
         page.set_content(html, wait_until="load")
-        page.wait_for_function("window.__ready === true", timeout=15000)
+        _await_render(page)
         png_bytes = page.screenshot(full_page=True, type="png")
         browser.close()
 
@@ -390,7 +420,7 @@ def render_ground_truth_box_to_image(content_doc: dict | list | None) -> bytes |
             device_scale_factor=settings.LLM_IMAGE_SCALE_FACTOR,
         )
         page.set_content(html, wait_until="load")
-        page.wait_for_function("window.__ready === true", timeout=15000)
+        _await_render(page)
         png_bytes = page.screenshot(full_page=True, type="png")
         browser.close()
 
@@ -422,10 +452,14 @@ def _measure(blocks: list[dict], content_w: int) -> list[dict]:
 <script src="{KATEX_JS}"></script>
 <script src="{KATEX_AUTORENDER}"></script>
 <script>
-renderMathInElement(document.body, {{delimiters:[
-  {{left:"\\\\(", right:"\\\\)", display:false}},
-  {{left:"\\\\[", right:"\\\\]", display:true}}
-]}});
+try {{
+  renderMathInElement(document.body, {{delimiters:[
+    {{left:"\\\\(", right:"\\\\)", display:false}},
+    {{left:"\\\\[", right:"\\\\]", display:true}}
+  ]}});
+}} catch (e) {{
+  window.__katexError = String(e);
+}}
 window.__ready = true;
 </script></body></html>"""
 
@@ -433,7 +467,7 @@ window.__ready = true;
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": content_w, "height": 400})
         page.set_content(html, wait_until="load")
-        page.wait_for_function("window.__ready === true", timeout=15000)
+        _await_render(page)
         rects = page.eval_on_selector_all(
             ".measure > div",
             "els => els.map(e => { const r = e.getBoundingClientRect(); return {top: r.top, height: r.height}; })",
@@ -651,10 +685,14 @@ def render_finalized_question(question: dict) -> dict:
 <script src="{KATEX_JS}"></script>
 <script src="{KATEX_AUTORENDER}"></script>
 <script>
-renderMathInElement(document.body, {{delimiters:[
-  {{left:"\\\\(", right:"\\\\)", display:false}},
-  {{left:"\\\\[", right:"\\\\]", display:true}}
-]}});
+try {{
+  renderMathInElement(document.body, {{delimiters:[
+    {{left:"\\\\(", right:"\\\\)", display:false}},
+    {{left:"\\\\[", right:"\\\\]", display:true}}
+  ]}});
+}} catch (e) {{
+  window.__katexError = String(e);
+}}
 window.__ready = true;
 </script></body></html>"""
 
@@ -662,7 +700,7 @@ window.__ready = true;
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": canvas_w, "height": canvas_h})
         page.set_content(final_html, wait_until="load")
-        page.wait_for_function("window.__ready === true", timeout=15000)
+        _await_render(page)
 
         measured = page.evaluate("""() => {
             const boxes = {};
