@@ -128,10 +128,21 @@ class AnswerGradeOut(BaseModel):
     score: float | None
     llm_score: float | None
     override_score: float | None
+    # The merged view, for anywhere that just wants "the feedback".
     feedback: str | None
+    # Kept separate as well: the teacher's editor has to show what the
+    # teacher wrote, not the model's words with theirs merged over the
+    # top, or an edit begins from the wrong text.
+    llm_feedback: str | None = None
+    override_feedback: str | None = None
     provider: str | None
     needs_manual_review: bool
     review_reason: str | None
+    # The teacher's own worked answer for this box, including whatever
+    # marking scheme they wrote into it. Sent to a student only once
+    # their marks are released — before that it is the answer key.
+    model_answer_text: str | None = None
+    model_answer_images: list[str] = []
 
 
 class SubmissionGradesOut(BaseModel):
