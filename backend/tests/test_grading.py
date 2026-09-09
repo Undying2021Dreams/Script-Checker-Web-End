@@ -431,13 +431,22 @@ def test_teacher_sees_all_submissions_student_sees_only_their_own(client, graded
 # ── Blank answers ───────────────────────────────────────────────────
 
 def _image(lines=(), bg="white", size=(900, 300)):
+    """
+    Build a crop with a known amount of ink on it.
+
+    The font is Pillow's own, at an explicit size, rather than one found
+    on the host. An earlier version reached for a macOS system path and
+    fell back to `load_default()` when it was missing, which on Linux
+    meant an ~11px bitmap font: "x = 3" then covered so few pixels that
+    it fell under the blank threshold, and the case asserting a real
+    answer is *not* blank passed on a developer's Mac while failing in
+    CI. A test guarding a threshold has to put the same number of dark
+    pixels on the page everywhere it runs.
+    """
     import io
     from PIL import Image, ImageDraw, ImageFont
 
-    try:
-        font = ImageFont.truetype("/System/Library/Fonts/Supplemental/Arial.ttf", 40)
-    except Exception:
-        font = ImageFont.load_default()
+    font = ImageFont.load_default(size=40)
 
     im = Image.new("RGB", size, bg)
     d = ImageDraw.Draw(im)
