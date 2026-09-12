@@ -18,6 +18,16 @@
     <meta name="description" content="Automated exam-script checking — author a paper, collect answers, mark them against your own scheme." />
   </head>
   <body>
+    <script>
+      // Inline and synchronous on purpose: run as a module or after the
+      // bundle and the page paints light first, then jumps.
+      try {
+        var t = localStorage.getItem('webend-theme') || 'system'
+        var dark = t === 'dark' ||
+          (t === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
+        if (dark) document.documentElement.classList.add('dark')
+      } catch (e) {}
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
