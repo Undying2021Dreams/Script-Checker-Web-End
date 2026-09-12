@@ -5,8 +5,10 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import Course, Enrollment, User
+from models import AnswerGrade, Course, Enrollment, Question, Submission, User
 from schemas import (
+    LeaderboardEntry,
+    LeaderboardOut,
     CourseCreate,
     CourseOut,
     CourseSummary,
@@ -204,6 +206,116 @@ def join_course(
 
     counts = _student_counts(db, [course.id])
     return _to_course_out(course, counts.get(course.id, 0), "student")
+
+
+@router.get("/popular", response_model=list[CourseSummary])
+def popular_courses(
+    limit: int = Query(6, ge=1, le=24),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),  # noqa: ARG001 — sign-in required
+):
+    """
+    The busiest courses, for somebody who has arrived with no join code
+    and nothing to search for yet.
+
+    Enrolment counts only. Nothing here is derived from anyone's marks.
+    """
+    rows = (
+        db.query(Course, func.count(Enrollment.id).label("students"))
+        .outerjoin(Enrollment, Enrollment.course_id == Course.id)
+        .filter(Course.archived.is_(False))
+        .group_by(Course.id)
+        .order_by(func.count(Enrollment.id).desc(), Course.title)
+        .limit(limit)
+        .all()
+    )
+    return [
+        CourseSummary(
+            id=c.id,
+            title=c.title,
+            teacher_name=c.teacher.display_name,
+            student_count=students,
+        )
+        for c, students in rows
+    ]
+
+
+@router.get("/{course_id}/leaderboard", response_model=LeaderboardOut)
+def course_leaderboard(
+    course_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    How the course is doing, and where the person asking stands in it.
+
+    Two rules decide what this may say.
+
+    Only released marks count. An unreleased mark is not the student's
+    to see, and a ranking built from unreleased work would leak the
+    order of results before anyone had been told their own.
+
+    Names appear only for the teacher, who can already see every mark, so
+    this shows them nothing new. For a student the table is anonymous
+    apart from their own row: a ranking that names classmates publishes
+    the standing of whoever is last, and they did not ask for that.
+    """
+    course = _get_course_or_404(course_id, db)
+    _assert_can_view(course, user, db)
+    is_teacher = course.teacher_id == user.id or user.role == "admin"
+
+    rows = (
+        db.query(
+            Submission.student_id,
+            func.coalesce(
+                func.sum(func.coalesce(AnswerGrade.override_score, AnswerGrade.llm_score)), 0.0
+            ).label("earned"),
+            func.coalesce(func.sum(AnswerGrade.max_score), 0.0).label("out_of"),
+        )
+        .join(Question, Question.id == Submission.question_id)
+        .join(AnswerGrade, AnswerGrade.submission_id == Submission.id)
+        .filter(
+            Question.course_id == course_id,
+            Submission.released_at.isnot(None),
+            Submission.student_id.isnot(None),
+        )
+        .group_by(Submission.student_id)
+        .all()
+    )
+
+    names = {
+        u.id: u.display_name
+        for u in db.query(User).filter(User.id.in_([r.student_id for r in rows])).all()
+    } if rows else {}
+
+    ordered = sorted(rows, key=lambda r: (-float(r.earned), names.get(r.student_id, "")))
+
+    entries: list[LeaderboardEntry] = []
+    my_rank = None
+    for i, r in enumerate(ordered, start=1):
+        mine = r.student_id == user.id
+        if mine:
+            my_rank = i
+        entries.append(
+            LeaderboardEntry(
+                rank=i,
+                display_name=names.get(r.student_id) if (is_teacher or mine) else None,
+                earned=float(r.earned),
+                max_score=float(r.out_of),
+                is_me=mine,
+            )
+        )
+
+    average = (
+        round(sum(e.earned for e in entries) / len(entries), 2) if entries else None
+    )
+    return LeaderboardOut(
+        entries=entries,
+        my_rank=my_rank,
+        ranked=len(entries),
+        class_average=average,
+        named=is_teacher,
+    )
 
 
 @router.get("/{course_id}", response_model=CourseOut)

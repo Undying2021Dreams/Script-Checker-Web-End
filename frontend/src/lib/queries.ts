@@ -6,6 +6,7 @@ import type {
   Course,
   Gradebook,
   CourseSummary,
+  Leaderboard,
   EnrolledStudent,
   Me,
   GroundTruthPreview,
@@ -351,5 +352,20 @@ export function useCheckAnswerKey(questionId: string) {
         method: 'POST',
         body: JSON.stringify({ provider, ground_truth_box_id: groundTruthBoxId ?? null }),
       }),
+  })
+}
+
+export function useLeaderboard(courseId: string, enabled = true) {
+  return useQuery({
+    enabled,
+    queryKey: ['leaderboard', courseId],
+    queryFn: () => apiFetch<Leaderboard>(`/courses/${courseId}/leaderboard`),
+  })
+}
+
+export function usePopularCourses() {
+  return useQuery({
+    queryKey: ['popular-courses'],
+    queryFn: () => apiFetch<CourseSummary[]>('/courses/popular'),
   })
 }

@@ -3,11 +3,28 @@ import { useState } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { useCourseSearch } from '@/lib/queries'
+import { StatusPill } from '@/components/ui/feedback'
+import { useCourseSearch, usePopularCourses } from '@/lib/queries'
+import type { CourseSummary } from '@/lib/types'
+
+function CourseRow({ course }: { course: CourseSummary }) {
+  return (
+    <Card>
+      <CardContent className="flex items-center justify-between gap-3 py-4">
+        <div className="min-w-0">
+          <p className="truncate font-medium">{course.title}</p>
+          <p className="truncate text-sm text-muted-foreground">{course.teacher_name}</p>
+        </div>
+        <StatusPill>{course.student_count} enrolled</StatusPill>
+      </CardContent>
+    </Card>
+  )
+}
 
 export function SearchPage() {
   const [term, setTerm] = useState('')
   const { data: results, isFetching, error } = useCourseSearch(term)
+  const { data: popular } = usePopularCourses()
 
   return (
     <div className="space-y-6">
@@ -34,19 +51,25 @@ export function SearchPage() {
 
       <div className="space-y-3">
         {results?.map((course) => (
-          <Card key={course.id}>
-            <CardContent className="flex items-center justify-between py-4">
-              <div>
-                <p className="font-medium">{course.title}</p>
-                <p className="text-sm text-muted-foreground">{course.teacher_name}</p>
-              </div>
-              <span className="text-sm text-muted-foreground">
-                {course.student_count} enrolled
-              </span>
-            </CardContent>
-          </Card>
+          <CourseRow key={course.id} course={course} />
         ))}
       </div>
+
+      {/* Arriving here with nothing to search for is the common case —
+          a student sent a link, with no join code and no course name in
+          mind. An empty box is a dead end; the busiest courses are at
+          least somewhere to start. Enrolment counts only, nothing
+          derived from anyone's marks. */}
+      {!term.trim() && (popular?.length ?? 0) > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-sm font-medium text-muted-foreground">Busiest courses</h2>
+          <div className="space-y-3">
+            {popular?.map((course) => (
+              <CourseRow key={course.id} course={course} />
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   )
 }
