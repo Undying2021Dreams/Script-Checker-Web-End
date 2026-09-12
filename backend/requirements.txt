@@ -21,6 +21,13 @@ alembic>=1.13
 
 # Auth (Microsoft Entra ID)
 fastapi-azure-auth>=4.3
+# Verify TLS against the operating system's trust store rather than
+# certifi's bundle alone. Entra is served from some networks with a
+# chain certifi does not carry, and when that happens the signing keys
+# cannot be fetched and every authenticated request fails with "Unable
+# to validate token". httpx pins certifi explicitly, so neither
+# SSL_CERT_FILE nor adding roots to the bundle reliably overrides it.
+truststore>=0.10
 
 # Background jobs (Playwright/OpenCV/LLM calls off the request path)
 arq>=0.26
