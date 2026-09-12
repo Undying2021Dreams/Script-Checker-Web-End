@@ -42,3 +42,6 @@ backend/ground_truth_storage/
 
 # The self-hosted model notebook is kept out of the repo deliberately.
 kaggle_self_hosted_llm.py
+
+# Azure credentials generated at deploy time — never commit.
+.azure-secrets/
