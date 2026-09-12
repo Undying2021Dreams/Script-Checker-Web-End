@@ -1,6 +1,24 @@
-from pathlib import Path
+# Trust what the operating system trusts, before anything opens a TLS
+# connection.
+#
+# httpx — and so the Entra token validation every authenticated request
+# depends on — verifies against certifi's bundle rather than the system
+# one. From some networks, login.microsoftonline.com is served with a
+# chain whose root certifi does not carry, and the symptom is brutal:
+# the signing keys cannot be fetched, so every token is rejected with
+# "Unable to validate token" while nothing in the application has
+# changed. The same image, run from a different network, is fine.
+#
+# This is done here rather than by adding roots to certifi's bundle
+# because httpx passes that bundle explicitly, so neither SSL_CERT_FILE
+# nor appending to the file reliably overrides what it verifies against.
+import truststore
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, status
+truststore.inject_into_ssl()
+
+from pathlib import Path  # noqa: E402
+
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, status  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
