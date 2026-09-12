@@ -1,6 +1,7 @@
 import { useMsal } from '@azure/msal-react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
 
+import { Logo } from '@/components/Logo'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useMe } from '@/lib/queries'
@@ -21,8 +22,8 @@ export function AppLayout() {
           always on screen rather than a scroll away. */}
       <header className="sticky top-0 z-30 border-b bg-card/85 backdrop-blur">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-4 px-6 py-3">
-          <Link to="/" className="font-semibold tracking-tight">
-            Web-End
+          <Link to="/" aria-label="AutoCheck home">
+            <Logo />
           </Link>
 
           <nav className="flex gap-1">
