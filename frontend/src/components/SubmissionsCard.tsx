@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 
-import { Badge } from '@/components/ui/badge'
+import { EmptyState, Pending, Skeleton, Spinner, StatusPill } from '@/components/ui/feedback'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useGradeAll, useReleaseAll, useSubmissions, useUploadSubmission } from '@/lib/queries'
@@ -12,16 +12,23 @@ function StatusBadge({ submission }: { submission: SubmissionSummary }) {
   const { grading_status, released, needs_review_count } = submission
 
   if (grading_status === 'queued' || grading_status === 'grading') {
-    return <Badge variant="outline">Grading…</Badge>
+    return (
+      <StatusPill tone="info">
+        <Spinner className="size-3" />
+        Marking
+      </StatusPill>
+    )
   }
-  if (grading_status === 'failed') return <Badge variant="destructive">Failed</Badge>
-  if (grading_status === 'ungraded') return <Badge variant="outline">Not graded</Badge>
+  if (grading_status === 'failed') return <StatusPill tone="danger">Failed</StatusPill>
+  if (grading_status === 'ungraded') return <StatusPill>Not marked</StatusPill>
 
   return (
     <span className="flex items-center gap-1.5">
-      <Badge variant="secondary">Graded</Badge>
-      {!!needs_review_count && <Badge variant="outline">{needs_review_count} to review</Badge>}
-      {released && <Badge>Released</Badge>}
+      <StatusPill tone="success">Marked</StatusPill>
+      {!!needs_review_count && (
+        <StatusPill tone="warning">{needs_review_count} to review</StatusPill>
+      )}
+      {released && <StatusPill tone="info">Released</StatusPill>}
     </span>
   )
 }
@@ -144,7 +151,7 @@ export function SubmissionsCard({ questionId }: { questionId: string }) {
               onClick={() => runGradeAll(false)}
               disabled={gradeAll.isPending || inFlight}
             >
-              {inFlight ? 'Marking…' : `Mark ${ungraded} unmarked`}
+              {inFlight ? <Pending>Marking…</Pending> : `Mark ${ungraded} unmarked`}
             </Button>
             <Button
               size="sm"
@@ -162,7 +169,11 @@ export function SubmissionsCard({ questionId }: { questionId: string }) {
               disabled={releaseAll.isPending || inFlight || !graded}
               title="Publishes every marked submission at once. Unmarked work stays hidden."
             >
-              {releaseAll.isPending ? 'Releasing…' : `Release ${graded} to students`}
+              {releaseAll.isPending ? (
+                <Pending>Releasing…</Pending>
+              ) : (
+                `Release ${graded} to students`
+              )}
             </Button>
             <Button
               size="sm"
@@ -181,13 +192,18 @@ export function SubmissionsCard({ questionId }: { questionId: string }) {
           </div>
         )}
 
-        {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+        {isLoading && (
+          <div className="space-y-2">
+            <Skeleton className="h-12 w-full" />
+            <Skeleton className="h-12 w-full" />
+          </div>
+        )}
         {error && <p className="text-sm text-destructive">{(error as Error).message}</p>}
         {submissions?.length === 0 && (
-          <p className="text-sm text-muted-foreground">
-            No submissions yet. Print the PDF, have it answered, then upload a photo or scan of the
-            completed page.
-          </p>
+          <EmptyState
+            title="No submissions yet"
+            hint="Print the paper, have it answered, then upload a photo or scan of the completed page."
+          />
         )}
 
         {submissions?.map((s) => (

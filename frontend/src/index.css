@@ -7,24 +7,43 @@
 
 :root {
   color-scheme: light dark;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  /* The page sits slightly below white so that a card, which stays
+     white, separates from it without needing a heavy border. Every
+     surface being pure white was why the screen read as one flat sheet
+     with no way to tell one region from another. */
+  --background: oklch(0.985 0.003 250);
+  --foreground: oklch(0.17 0.01 260);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.17 0.01 260);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --popover-foreground: oklch(0.17 0.01 260);
+  /* A real hue, so anything you can act on is distinguishable from
+     text at a glance. The greyscale palette made buttons and headings
+     the same colour. */
+  --primary: oklch(0.52 0.17 259);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.96 0.006 260);
+  --secondary-foreground: oklch(0.28 0.02 260);
+  --muted: oklch(0.965 0.005 260);
+  --muted-foreground: oklch(0.53 0.02 260);
+  --accent: oklch(0.95 0.02 259);
+  --accent-foreground: oklch(0.38 0.09 259);
+  --destructive: oklch(0.58 0.21 27);
+  --border: oklch(0.91 0.006 260);
+  --input: oklch(0.89 0.008 260);
+  --ring: oklch(0.62 0.13 259);
+
+  /* States a teacher scans for. Marking is a status-heavy job — marked,
+     waiting, needs a human, published — and a badge that only differs
+     by its wording has to be read one at a time. */
+  --success: oklch(0.55 0.13 152);
+  --success-foreground: oklch(0.99 0 0);
+  --success-muted: oklch(0.95 0.04 152);
+  --warning: oklch(0.62 0.14 75);
+  --warning-foreground: oklch(0.2 0.05 75);
+  --warning-muted: oklch(0.96 0.06 85);
+  --info: oklch(0.55 0.12 250);
+  --info-muted: oklch(0.95 0.04 250);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
@@ -43,9 +62,19 @@
 
 body {
   margin: 0;
+  background: var(--background);
+  color: var(--foreground);
 }
 
 @theme inline {
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-muted: var(--success-muted);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-muted: var(--warning-muted);
+  --color-info: var(--info);
+  --color-info-muted: var(--info-muted);
   --font-heading: var(--font-sans);
   --font-sans: 'Geist Variable', sans-serif;
   --color-sidebar-ring: var(--sidebar-ring);
@@ -89,24 +118,35 @@ body {
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  /* Same relationship inverted: the card sits above the page rather
+     than below it, so the separation survives the theme. */
+  --background: oklch(0.17 0.01 260);
+  --foreground: oklch(0.97 0.004 260);
+  --card: oklch(0.22 0.012 260);
+  --card-foreground: oklch(0.97 0.004 260);
+  --popover: oklch(0.23 0.012 260);
+  --popover-foreground: oklch(0.97 0.004 260);
+  --primary: oklch(0.68 0.15 259);
+  --primary-foreground: oklch(0.16 0.02 260);
+  --secondary: oklch(0.28 0.015 260);
+  --secondary-foreground: oklch(0.96 0.004 260);
+  --muted: oklch(0.27 0.012 260);
+  --muted-foreground: oklch(0.72 0.02 260);
+  --accent: oklch(0.32 0.04 259);
+  --accent-foreground: oklch(0.9 0.05 259);
+  --destructive: oklch(0.7 0.19 22);
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 16%);
+  --ring: oklch(0.6 0.13 259);
+
+  --success: oklch(0.7 0.14 152);
+  --success-foreground: oklch(0.16 0.02 152);
+  --success-muted: oklch(0.3 0.06 152);
+  --warning: oklch(0.78 0.14 80);
+  --warning-foreground: oklch(0.18 0.04 80);
+  --warning-muted: oklch(0.32 0.06 80);
+  --info: oklch(0.7 0.12 250);
+  --info-muted: oklch(0.3 0.05 250);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);

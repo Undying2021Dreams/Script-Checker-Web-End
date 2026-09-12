@@ -16,10 +16,12 @@ export function AppLayout() {
   const { data: me } = useMe()
 
   return (
-    <div className="min-h-svh">
-      <header className="border-b">
+    <div className="min-h-svh bg-background">
+      {/* Sticky, so the way back out of a long review or editor screen is
+          always on screen rather than a scroll away. */}
+      <header className="sticky top-0 z-30 border-b bg-card/85 backdrop-blur">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-4 px-6 py-3">
-          <Link to="/" className="font-semibold">
+          <Link to="/" className="font-semibold tracking-tight">
             Web-End
           </Link>
 

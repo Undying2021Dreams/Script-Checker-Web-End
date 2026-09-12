@@ -8,6 +8,7 @@ import { SubmissionsCard } from '@/components/SubmissionsCard'
 import QuestionEditor from '@/components/editor/QuestionEditor'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { CardSkeleton, Pending, Skeleton } from '@/components/ui/feedback'
 import {
   Dialog,
   DialogClose,
@@ -100,7 +101,7 @@ function DeleteQuestionButton({
             onClick={handleDelete}
             disabled={!confirmed || remove.isPending}
           >
-            {remove.isPending ? 'Deleting…' : 'Delete assignment'}
+            {remove.isPending ? <Pending>Deleting…</Pending> : 'Delete assignment'}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -219,7 +220,14 @@ export function QuestionEditorPage() {
     return res.latex
   }
 
-  if (isLoading) return <p className="text-muted-foreground">Loading…</p>
+  if (isLoading) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-10 w-72" />
+        <CardSkeleton rows={5} />
+      </div>
+    )
+  }
   if (error) return <p className="text-destructive">{(error as Error).message}</p>
   if (!question) return null
 
@@ -275,13 +283,13 @@ export function QuestionEditorPage() {
               {/* The only way to change a finalized paper: its layout and
                   printed markers are frozen, so edits go into a fresh copy. */}
               <Button variant="outline" onClick={handleClone} disabled={clone.isPending}>
-                {clone.isPending ? 'Copying…' : 'Edit as a new copy'}
+                {clone.isPending ? <Pending>Copying…</Pending> : 'Edit as a new copy'}
               </Button>
               <DeleteQuestionButton questionId={questionId} courseId={question.course_id} />
             </>
           ) : (
             <Button onClick={handleFinalize} disabled={finalize.isPending}>
-              {finalize.isPending ? 'Finalizing…' : 'Finalize'}
+              {finalize.isPending ? <Pending>Finalizing…</Pending> : 'Finalize'}
             </Button>
           )}
         </div>

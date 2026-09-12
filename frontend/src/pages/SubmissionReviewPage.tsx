@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { AuthedImage } from '@/components/AuthedImage'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { CardSkeleton, Pending, Skeleton, StatusPill } from '@/components/ui/feedback'
 import { Label } from '@/components/ui/label'
 import {
   Dialog,
@@ -211,8 +212,8 @@ function GradeRow({
           <MarksEditor box={box} onSetMarks={onSetMarks} />
         </CardTitle>
         <div className="flex items-center gap-2">
-          {!box.complete && <Badge variant="destructive">Missing a page</Badge>}
-          {grade?.needs_manual_review && <Badge variant="outline">Needs review</Badge>}
+          {!box.complete && <StatusPill tone="danger">Missing a page</StatusPill>}
+          {grade?.needs_manual_review && <StatusPill tone="warning">Needs review</StatusPill>}
         </div>
       </CardHeader>
 
@@ -384,7 +385,15 @@ export function SubmissionReviewPage() {
     }
   }
 
-  if (loadingAnswers) return <p className="text-muted-foreground">Loading…</p>
+  if (loadingAnswers) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-10 w-64" />
+        <CardSkeleton rows={4} />
+        <CardSkeleton rows={4} />
+      </div>
+    )
+  }
   if (answersError) return <p className="text-destructive">{(answersError as Error).message}</p>
   if (!answers) return null
 
@@ -420,14 +429,26 @@ export function SubmissionReviewPage() {
             ))}
           </select>
           <Button onClick={handleGrade} disabled={runGrading.isPending || inFlight}>
-            {inFlight ? 'Grading…' : current?.grades.length ? 'Re-grade' : 'Grade with AI'}
+            {inFlight || runGrading.isPending ? (
+              <Pending>Marking…</Pending>
+            ) : current?.grades.length ? (
+              'Re-mark'
+            ) : (
+              'Mark with AI'
+            )}
           </Button>
           <Button
             variant="outline"
             onClick={handleRelease}
             disabled={current?.grading_status !== 'graded'}
           >
-            {current?.released ? 'Withdraw marks' : 'Release to student'}
+            {release.isPending ? (
+              <Pending>Working…</Pending>
+            ) : current?.released ? (
+              'Withdraw marks'
+            ) : (
+              'Release to student'
+            )}
           </Button>
         </div>
       </div>

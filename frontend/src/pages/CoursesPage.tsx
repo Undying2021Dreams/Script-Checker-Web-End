@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
+import { CardSkeleton, EmptyState, Pending } from '@/components/ui/feedback'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Dialog,
@@ -55,7 +56,7 @@ function CreateCourseDialog() {
         </div>
         <DialogFooter>
           <Button onClick={submit} disabled={!title.trim() || createCourse.isPending}>
-            {createCourse.isPending ? 'Creating…' : 'Create'}
+            {createCourse.isPending ? <Pending>Creating…</Pending> : 'Create'}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -120,17 +121,23 @@ export function CoursesPage() {
         {me && (isTeacher ? <CreateCourseDialog /> : <JoinCourseDialog />)}
       </div>
 
-      {isLoading && <p className="text-muted-foreground">Loading…</p>}
+      {isLoading && (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <CardSkeleton rows={2} />
+          <CardSkeleton rows={2} />
+        </div>
+      )}
       {error && <p className="text-destructive">{(error as Error).message}</p>}
 
       {courses?.length === 0 && (
-        <Card>
-          <CardContent className="py-10 text-center text-muted-foreground">
-            {isTeacher
-              ? 'No courses yet. Create one to get a join code for your students.'
-              : 'You haven’t joined any courses yet. Ask your teacher for a join code.'}
-          </CardContent>
-        </Card>
+        <EmptyState
+          title={isTeacher ? 'No courses yet' : 'You haven’t joined any courses yet'}
+          hint={
+            isTeacher
+              ? 'Create one to get a join code you can give your students.'
+              : 'Ask your teacher for a join code, or search for a course.'
+          }
+        />
       )}
 
       <div className="grid gap-4 sm:grid-cols-2">

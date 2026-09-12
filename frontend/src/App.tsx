@@ -8,6 +8,7 @@ import { GradebookPage } from './pages/GradebookPage'
 import { LoginPage } from './pages/LoginPage'
 import { QuestionEditorPage } from './pages/QuestionEditorPage'
 import { SearchPage } from './pages/SearchPage'
+import { StudentResultPage } from './pages/StudentResultPage'
 import { SubmissionReviewPage } from './pages/SubmissionReviewPage'
 import { Toaster } from '@/components/ui/sonner'
 
@@ -23,6 +24,7 @@ function App() {
             <Route path="/courses/:courseId/gradebook" element={<GradebookPage />} />
             <Route path="/questions/:questionId" element={<QuestionEditorPage />} />
             <Route path="/submissions/:submissionId" element={<SubmissionReviewPage />} />
+            <Route path="/results/:submissionId" element={<StudentResultPage />} />
           </Route>
         </Routes>
       </AuthenticatedTemplate>

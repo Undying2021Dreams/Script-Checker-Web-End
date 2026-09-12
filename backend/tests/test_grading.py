@@ -846,3 +846,46 @@ def test_a_part_with_no_marks_set_is_not_graded(client, graded_setup, db, monkey
     assert unset["needs_manual_review"] is True
     assert "No marks set" in unset["review_reason"]
     assert unset["score"] is None
+
+
+# ── Marked work cannot be replaced ──────────────────────────────────
+
+def test_a_student_cannot_resubmit_once_marked(client, graded_setup, db, monkeypatch):
+    """
+    The mark on record has to belong to the work on record. And once
+    marks are released the student has seen both their result and the
+    model answer, so a second attempt would be made knowing the answer.
+    """
+    import io
+
+    teacher = graded_setup["teacher"]
+    student = graded_setup["student"]
+    question_id = graded_setup["question"].id
+
+    _use_fake_provider(monkeypatch, ["SCORE: 3\nFEEDBACK: ok"] * 2)
+    _grade(client, teacher, graded_setup["submission"].id)
+
+    res = client.as_user(student).post(
+        "/api/submissions",
+        data={"question_id": question_id, "modality": "photo"},
+        files={"image": ("page.png", io.BytesIO(b"not really a png"), "image/png")},
+    )
+    assert res.status_code == 409
+    assert "already been marked" in res.json()["detail"]
+
+
+def test_a_teacher_may_still_upload_after_marking(client, graded_setup, db, monkeypatch):
+    """Scanning a corrected page on a student's behalf stays possible."""
+    import io
+
+    teacher = graded_setup["teacher"]
+    _use_fake_provider(monkeypatch, ["SCORE: 3\nFEEDBACK: ok"] * 2)
+    _grade(client, teacher, graded_setup["submission"].id)
+
+    res = client.as_user(teacher).post(
+        "/api/submissions",
+        data={"question_id": graded_setup["question"].id, "modality": "photo"},
+        files={"image": ("page.png", io.BytesIO(b"not really a png"), "image/png")},
+    )
+    # Not blocked by the resubmission rule; the bad image fails later.
+    assert res.status_code != 409

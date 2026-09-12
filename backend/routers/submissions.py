@@ -31,6 +31,45 @@ from services.grading_runner import submission_totals
 router = APIRouter(prefix="/submissions", tags=["submissions"])
 
 
+def _assert_not_already_marked(question_id: str, db: Session, user: User) -> None:
+    """
+    A student may not replace work that has already been marked.
+
+    Once a script has been graded, letting the student upload a new one
+    means the mark on record no longer belongs to the work on record —
+    and if it has been released, they have seen their result and the
+    model answer before deciding to submit again.
+
+    Teachers are not stopped: scanning a corrected page on a student's
+    behalf after marking is a normal correction, and it is their mark to
+    revise.
+    """
+    course = (
+        db.query(Course)
+        .join(Question, Question.course_id == Course.id)
+        .filter(Question.id == question_id)
+        .first()
+    )
+    if user.role == "admin" or (course is not None and course.teacher_id == user.id):
+        return
+
+    marked = (
+        db.query(Submission)
+        .filter(
+            Submission.question_id == question_id,
+            Submission.student_id == user.id,
+            Submission.grading_status == "graded",
+        )
+        .first()
+    )
+    if marked is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Your answer for this question has already been marked, so it can't be replaced. "
+            "Ask your teacher if you need to submit again.",
+        )
+
+
 def _get_question_for_submission(question_id: str, db: Session, user: User) -> Question:
     """
     A question the caller may submit against: one in a course they're
@@ -214,6 +253,7 @@ async def create_submission(
     q = _get_question_for_submission(question_id, db, user)
     if q.state != "finalized":
         raise HTTPException(status_code=400, detail="Question must be finalized before submissions can be processed.")
+    _assert_not_already_marked(question_id, db, user)
 
     sub = None
     if submission_id:
@@ -317,6 +357,7 @@ def create_tablet_submission(body: TabletSubmission, page_index: int = 0, user: 
     q = _get_question_for_submission(body.question_id, db, user)
     if q.state != "finalized":
         raise HTTPException(status_code=400, detail="Question must be finalized before submissions can be processed.")
+    _assert_not_already_marked(body.question_id, db, user)
 
     question_dict = _question_to_dict(q)
     sub_id = str(uuid.uuid4())
