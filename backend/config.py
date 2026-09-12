@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     AZURE_CLIENT_ID: str = ""
     AZURE_OPENAPI_CLIENT_ID: str = ""  # frontend SPA app registration's client ID (for Swagger UI login only)
 
+    # When true, anyone who signs in may start a course of their own and
+    # teaches only that. The keys this app uses are free-tier, so the
+    # exposure is a burnt quota rather than a bill — but a stranger
+    # exhausting it an hour before a demo is still a bad afternoon, so it
+    # stays a switch rather than a decision baked into the code.
+    OPEN_COURSE_CREATION: bool = True
+
     # Comma-separated emails auto-assigned role="teacher" on first sign-in.
     # Everyone else who signs in becomes role="student". No admin UI for
     # this yet — deliberately simple for a small, few-teacher deployment.

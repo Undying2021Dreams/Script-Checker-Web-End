@@ -3,6 +3,10 @@ export interface Me {
   email: string
   display_name: string
   role: 'teacher' | 'student' | 'admin'
+  // Whether this account may start a course. Depends on a deployment
+  // setting as well as the account, so it is told to us rather than
+  // inferred from the role.
+  can_create_courses: boolean
 }
 
 export interface Course {

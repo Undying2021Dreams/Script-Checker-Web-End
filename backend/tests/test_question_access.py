@@ -90,10 +90,16 @@ def test_enrolled_student_cannot_reach_authoring_routes(client, course, question
     student = make_user(role="student")
     _enrol(db, course, student)
 
-    # Authoring is teacher work, and QuestionOut carries ground-truth boxes
-    # (the answer key), so students must not reach it at all.
-    assert client.as_user(student).get(f"/api/questions/{question.id}").status_code == 403
-    assert client.as_user(student).post(f"/api/questions/{question.id}/finalize").status_code == 403
+    # Authoring is the course owner's work, and QuestionOut carries
+    # ground-truth boxes (the answer key), so students must not reach it
+    # at all.
+    #
+    # 404 rather than 403: the refusal now comes from the ownership check
+    # rather than a global role gate, and it declines to confirm that a
+    # question with this id exists — the same choice made for another
+    # teacher's questions.
+    assert client.as_user(student).get(f"/api/questions/{question.id}").status_code == 404
+    assert client.as_user(student).post(f"/api/questions/{question.id}/finalize").status_code == 404
 
 
 def test_enrolled_student_may_submit_but_outsider_may_not(client, course, question, make_user, db):

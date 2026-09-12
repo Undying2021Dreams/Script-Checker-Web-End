@@ -41,7 +41,7 @@ from models import (
 from ratelimit import HEAVY_CPU_LIMIT, LLM_LIMIT, limiter
 from services.grading import marking_scheme_total, pair_answer_boxes_with_ground_truth
 from services.llm_provider import extract_plain_text as _extract_plain_text
-from security import get_current_user, require_teacher
+from security import get_current_user
 from schemas import (
     AnswerBoxMarks,
     QuestionCreate,
@@ -196,7 +196,7 @@ def set_answer_box_marks(
     question_id: str,
     box_id: str,
     body: AnswerBoxMarks,
-    user: User = Depends(require_teacher),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -349,7 +349,7 @@ def _upsert_ground_truth_boxes(q: Question, boxes_in: list, db: Session, box_con
 def create_question(
     body: QuestionCreate,
     course_id: str,
-    user: User = Depends(require_teacher),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Create a draft question inside a course you teach."""
@@ -375,7 +375,7 @@ def create_question(
 @router.get("", response_model=list[QuestionOut])
 def list_questions(
     course_id: str,
-    user: User = Depends(require_teacher),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Questions in a course you teach. Unlike Component-1, questions are
@@ -395,7 +395,7 @@ def list_questions(
 def update_question_meta(
     question_id: str,
     body: QuestionMetaUpdate,
-    user: User = Depends(require_teacher),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -414,13 +414,13 @@ def update_question_meta(
 
 
 @router.get("/{question_id}", response_model=QuestionOut)
-def get_question(question_id: str, user: User = Depends(require_teacher), db: Session = Depends(get_db)):
+def get_question(question_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     q = _get_question_or_404(question_id, db, user)
     return _question_to_out(q, db=db)
 
 
 @router.put("/{question_id}/blocks", response_model=QuestionOut)
-def save_content(question_id: str, body: QuestionContentUpdate, user: User = Depends(require_teacher), db: Session = Depends(get_db)):
+def save_content(question_id: str, body: QuestionContentUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """
     Autosave endpoint — path kept as /blocks to match the frontend's
     existing saveQuestionContent() call; body/behavior is doc+answer_boxes
@@ -441,7 +441,7 @@ def save_content(question_id: str, body: QuestionContentUpdate, user: User = Dep
 
 
 @router.post("/{question_id}/images")
-async def upload_image(question_id: str, image: UploadFile = File(...), user: User = Depends(require_teacher), db: Session = Depends(get_db)):
+async def upload_image(question_id: str, image: UploadFile = File(...), user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Store an image the teacher inserts inline in the doc. Draft only —
     once finalized, content (and therefore images) is frozen."""
     q = _get_question_or_404(question_id, db, user)
@@ -472,7 +472,7 @@ async def upload_image(question_id: str, image: UploadFile = File(...), user: Us
 
 @router.post("/{question_id}/suggest-rubric")
 @limiter.limit(LLM_LIMIT)
-async def suggest_rubric(request: Request, question_id: str, body: RubricSuggestRequest, user: User = Depends(require_teacher), db: Session = Depends(get_db)):
+async def suggest_rubric(request: Request, question_id: str, body: RubricSuggestRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """LLM proposes point values + rubric text per answer box — the teacher
     reviews and edits in the UI; nothing here is auto-applied to the DB."""
     q = _get_question_or_404(question_id, db, user)
@@ -498,7 +498,7 @@ async def equation_from_image(
     question_id: str,
     provider: str = Form(...),
     image: UploadFile = File(...),
-    user: User = Depends(require_teacher), db: Session = Depends(get_db),
+    user: User = Depends(get_current_user), db: Session = Depends(get_db),
 ):
     """Transcribe an uploaded image of an equation into LaTeX so a teacher
     who doesn't know LaTeX can still author one. Returned LaTeX is never
@@ -527,7 +527,7 @@ async def equation_from_image(
 
 @router.post("/{question_id}/check-correctness")
 @limiter.limit(LLM_LIMIT)
-async def check_correctness(request: Request, question_id: str, body: CorrectnessCheckRequest, user: User = Depends(require_teacher), db: Session = Depends(get_db)):
+async def check_correctness(request: Request, question_id: str, body: CorrectnessCheckRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """LLM sanity-checks each of this question's own ground truth answers
     against the specific sub-question it answers — catches a teacher's own
     mistakes (wrong answer key, ambiguous wording) before students see
@@ -610,7 +610,7 @@ async def check_correctness(request: Request, question_id: str, body: Correctnes
 
 
 @router.get("/{question_id}/ground-truth")
-def list_ground_truth_boxes(question_id: str, user: User = Depends(require_teacher), db: Session = Depends(get_db)):
+def list_ground_truth_boxes(question_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     _get_question_or_404(question_id, db, user)
     boxes = db.query(GroundTruthBox).filter(GroundTruthBox.question_id == question_id).order_by(GroundTruthBox.order_index).all()
     result = []
@@ -624,7 +624,7 @@ def list_ground_truth_boxes(question_id: str, user: User = Depends(require_teach
 
 
 @router.post("/{question_id}/ground-truth", response_model=list[GroundTruthBoxOut])
-def upsert_ground_truth_boxes(question_id: str, body: list[GroundTruthBoxIn], user: User = Depends(require_teacher), db: Session = Depends(get_db)):
+def upsert_ground_truth_boxes(question_id: str, body: list[GroundTruthBoxIn], user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     q = _get_question_or_404(question_id, db, user)
     _assert_draft(q)
     _upsert_ground_truth_boxes(q, body, db)
@@ -640,7 +640,7 @@ def _content_disposition(download: bool, filename: str) -> dict:
 
 
 @router.get("/ground-truth-images/{image_id}")
-def get_ground_truth_image(image_id: str, download: bool = False, user: User = Depends(require_teacher), db: Session = Depends(get_db)):
+def get_ground_truth_image(image_id: str, download: bool = False, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     img = db.query(GroundTruthImage).filter(GroundTruthImage.id == image_id).first()
     if not img:
         raise HTTPException(status_code=404, detail="Ground truth image not found")
@@ -667,7 +667,7 @@ def get_ground_truth_image(image_id: str, download: bool = False, user: User = D
 
 
 @router.get("/question-images/{image_id}")
-def get_question_image(image_id: str, download: bool = False, user: User = Depends(require_teacher), db: Session = Depends(get_db)):
+def get_question_image(image_id: str, download: bool = False, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     img = db.query(QuestionImage).filter(QuestionImage.id == image_id).first()
     if not img:
         raise HTTPException(status_code=404, detail="Question image not found")
@@ -690,7 +690,7 @@ def get_question_image(image_id: str, download: bool = False, user: User = Depen
 
 
 @router.get("/{question_id}/question-images")
-def list_question_images(question_id: str, ground_truth_box_id: str, user: User = Depends(require_teacher), db: Session = Depends(get_db)):
+def list_question_images(question_id: str, ground_truth_box_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     _get_question_or_404(question_id, db, user)
     img = db.query(QuestionImage).filter(
         QuestionImage.question_id == question_id,
@@ -707,7 +707,7 @@ def list_question_images(question_id: str, ground_truth_box_id: str, user: User 
 
 
 @router.post("/{question_id}/regenerate-ground-truth")
-def regenerate_ground_truth(question_id: str, user: User = Depends(require_teacher), db: Session = Depends(get_db)):
+def regenerate_ground_truth(question_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Regenerate ground truth images AND question segment images for an
     already-finalized question. Useful if rendering failed during the
     original finalization."""
@@ -771,7 +771,7 @@ def regenerate_ground_truth(question_id: str, user: User = Depends(require_teach
 
 @router.post("/{question_id}/finalize", response_model=QuestionOut)
 @limiter.limit(HEAVY_CPU_LIMIT)
-def finalize_question(request: Request, question_id: str, user: User = Depends(require_teacher), db: Session = Depends(get_db)):
+def finalize_question(request: Request, question_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """
     Freeze a draft question. Unlike the old canvas model, this now has real
     work to do: render the doc once, measure where each answer box actually
@@ -892,7 +892,7 @@ def finalize_question(request: Request, question_id: str, user: User = Depends(r
 
 
 @router.get("/{question_id}/pdf")
-def export_pdf(question_id: str, user: User = Depends(require_teacher), db: Session = Depends(get_db)):
+def export_pdf(question_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Serve the PDF baked during finalize (stored in the database)."""
     q = _get_question_or_404(question_id, db, user)
     if q.state != "finalized":
@@ -910,7 +910,7 @@ def export_pdf(question_id: str, user: User = Depends(require_teacher), db: Sess
 @router.delete("/{question_id}")
 def delete_question(
     question_id: str,
-    user: User = Depends(require_teacher),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -959,7 +959,7 @@ def delete_question(
 
 
 @router.post("/{question_id}/clone", response_model=QuestionOut, status_code=201)
-def clone_question(question_id: str, user: User = Depends(require_teacher), db: Session = Depends(get_db)):
+def clone_question(question_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Clone a finalized question into a new draft. bbox/page dims are NOT
     copied — they're re-measured on next finalize. Image files are copied
     from the original question to the new question in the database."""

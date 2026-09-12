@@ -13,6 +13,11 @@ class UserOut(BaseModel):
     email: str
     display_name: str
     role: str
+    # Whether this account may start a course of its own — the only
+    # permission that is global rather than a fact about one course.
+    # Sent because the client cannot work it out: it depends on a
+    # deployment setting as well as the account.
+    can_create_courses: bool = True
 
 
 class CourseCreate(BaseModel):

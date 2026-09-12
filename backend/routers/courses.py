@@ -14,7 +14,7 @@ from schemas import (
     JoinRequest,
 )
 from ratelimit import JOIN_LIMIT, limiter
-from security import get_current_user, require_teacher
+from security import get_current_user, may_create_courses, require_teacher
 
 router = APIRouter(prefix="/courses", tags=["courses"])
 
@@ -83,7 +83,7 @@ def _assert_can_view(course: Course, user: User, db: Session) -> None:
 @router.post("", response_model=CourseOut, status_code=status.HTTP_201_CREATED)
 def create_course(
     body: CourseCreate,
-    user: User = Depends(require_teacher),
+    user: User = Depends(may_create_courses),
     db: Session = Depends(get_db),
 ):
     course = Course(
