@@ -38,7 +38,7 @@ export function QuestionsCard({ courseId }: { courseId: string }) {
         )}
 
         {questions?.map((q) => {
-          const marks = q.answer_boxes.reduce((sum, b) => sum + b.points, 0)
+          const marks = q.answer_boxes.reduce((sum, b) => sum + (b.points ?? 0), 0)
           return (
             <button
               key={q.question_id}

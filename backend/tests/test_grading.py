@@ -743,6 +743,13 @@ def test_model_answer_is_withheld_until_marks_are_released(client, graded_setup,
 @pytest.mark.parametrize("scheme,expected", [
     ("1. For correct substitution - 5 marks. 2. For the answer - 5 marks.", 10),
     ("Award 2 marks for the method and 3 marks for the answer. Total: 5 marks", 5),
+    # A rubric that states its total and then breaks it down: the ten is
+    # the whole, not an eleventh mark on top of the parts.
+    ("This question is worth 10 marks. Give 4 marks for setup, 6 marks for the answer.", 10),
+    ("Out of 8 marks: 3 marks method, 5 marks answer", 8),
+    ("Maximum 12 marks. 6 marks each for the two parts.", 12),
+    # Two figures introduced the same way, so neither is the whole.
+    ("Step A is worth 5 marks, step B is worth 5 marks", 10),
     ("Worth 4 marks.", 4),
     ("0.5 marks for each of the two steps: 0.5 marks, 0.5 marks", None),
     ("x = 3", None),
@@ -766,3 +773,76 @@ def test_a_half_mark_scheme_is_left_alone():
     from services.grading import marking_scheme_total
 
     assert marking_scheme_total("1 mark for setup, 0.5 marks for the answer") is None
+
+
+# ── Releasing a whole class at once ─────────────────────────────────
+
+def test_bulk_release_publishes_marked_work_and_reports_the_rest(
+    client, graded_setup, db, make_user, monkeypatch
+):
+    """
+    Unmarked submissions are reported back, not silently passed over: a
+    teacher pressing "release all" believes the class has been dealt
+    with, and needs telling when part of it hasn't.
+    """
+    from models import Enrollment, Submission
+
+    teacher = graded_setup["teacher"]
+    question_id = graded_setup["question"].id
+    graded = graded_setup["submission"]
+
+    other = make_user(role="student")
+    db.add(Enrollment(course_id=graded_setup["course"].id, student_id=other.id))
+    ungraded = Submission(
+        question_id=question_id, student_id=other.id, modality="photo", manifest={}
+    )
+    db.add(ungraded)
+    db.commit()
+    ungraded_id = ungraded.id
+
+    _use_fake_provider(monkeypatch, ["SCORE: 4\nFEEDBACK: good"] * 2)
+    _grade(client, teacher, graded.id)
+
+    res = client.as_user(teacher).post(f"/api/questions/{question_id}/release-all",
+                                       json={"released": True})
+    assert res.status_code == 200, res.text
+    assert res.json() == {"changed": 1, "skipped": 1}
+
+    db.expire_all()
+    assert db.query(Submission).filter(Submission.id == graded.id).one().released_at is not None
+    assert db.query(Submission).filter(Submission.id == ungraded_id).one().released_at is None
+
+    # Withdrawing does not care whether the work was marked.
+    res = client.as_user(teacher).post(f"/api/questions/{question_id}/release-all",
+                                       json={"released": False})
+    assert res.json()["changed"] == 2
+    db.expire_all()
+    assert db.query(Submission).filter(Submission.id == graded.id).one().released_at is None
+
+
+def test_another_teacher_cannot_release_your_class(client, graded_setup, make_user):
+    other = make_user(role="teacher")
+    res = client.as_user(other).post(
+        f"/api/questions/{graded_setup['question'].id}/release-all", json={"released": True}
+    )
+    assert res.status_code == 404
+
+
+# ── A part with no marks is not marked out of a guess ───────────────
+
+def test_a_part_with_no_marks_set_is_not_graded(client, graded_setup, db, monkeypatch):
+    from models import AnswerBox
+
+    teacher = graded_setup["teacher"]
+    sub = graded_setup["submission"]
+
+    db.query(AnswerBox).filter(AnswerBox.id == "a1").update({"points": None})
+    db.commit()
+
+    _use_fake_provider(monkeypatch, ["SCORE: 5\nFEEDBACK: fine"] * 2)
+    body = _grade(client, teacher, sub.id).json()
+
+    unset = next(g for g in body["grades"] if g["answer_box_id"] == "a1")
+    assert unset["needs_manual_review"] is True
+    assert "No marks set" in unset["review_reason"]
+    assert unset["score"] is None

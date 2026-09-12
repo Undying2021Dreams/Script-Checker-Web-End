@@ -113,6 +113,18 @@ class BulkGradeStarted(BaseModel):
     skipped: int
 
 
+class BulkReleaseRequest(BaseModel):
+    # False withdraws instead, so a paper released early can be pulled
+    # back in one action rather than script by script.
+    released: bool = True
+
+
+class BulkReleaseResult(BaseModel):
+    changed: int
+    # Submissions left alone because they have not been marked yet.
+    skipped: int
+
+
 class GradeOverride(BaseModel):
     # None clears the override and falls back to the model's own mark.
     score: float | None = None
@@ -164,7 +176,10 @@ class AnswerBoxIn(BaseModel):
     """What the frontend sends — matches AnswerBoxNode's attrs exactly."""
     id: str
     label: str = ""
-    points: int = 1
+    # None means the marks are still undecided. The editor sends it that
+    # way for a new box, and finalizing fills it in from the marking
+    # scheme in the model answer.
+    points: int | None = None
 
 
 class AnswerBoxOut(AnswerBoxIn):
@@ -280,7 +295,7 @@ class AnswerPartOut(BaseModel):
 class GroupedAnswerBoxOut(BaseModel):
     answer_box_id: str
     label: str
-    points: int
+    points: int | None
     order_index: int
     expected_parts: int
     parts: list[AnswerPartOut]

@@ -33,7 +33,7 @@ export interface EnrolledStudent {
 export interface AnswerBox {
   id: string
   label: string
-  points: number
+  points: number | null
   bbox: number[] | null
   page_index: number | null
 }
@@ -62,7 +62,7 @@ export interface Question {
 /** What the editor emits on change — the doc plus its boxes, indexed out. */
 export interface QuestionDocPayload {
   content: Record<string, unknown>
-  answer_boxes: { id: string; label: string; points: number }[]
+  answer_boxes: { id: string; label: string; points: number | null }[]
   ground_truth_boxes: { id: string; label: string }[]
 }
 
@@ -122,7 +122,7 @@ export interface AnswerPart {
 export interface GroupedAnswerBox {
   answer_box_id: string
   label: string
-  points: number
+  points: number | null
   order_index: number
   expected_parts: number
   parts: AnswerPart[]

@@ -50,15 +50,22 @@ def _my_latest_submission(question_id: str, db: Session, user: User) -> Submissi
 
 
 def _to_assignment(q: Question, db: Session, user: User) -> StudentAssignment:
+    # Parts whose marks are still undecided contribute nothing rather
+    # than being counted as some assumed value.
     total_marks = sum(
-        points for (points,) in db.query(AnswerBox.points).filter(AnswerBox.question_id == q.id).all()
+        points
+        for (points,) in db.query(AnswerBox.points).filter(AnswerBox.question_id == q.id).all()
+        if points is not None
     )
     sub = _my_latest_submission(q.id, db, user)
 
     earned = max_score = None
     if sub is not None and sub.released_at is not None:
         totals = submission_totals(db, sub.id)
-        earned, max_score = totals["earned"], totals["max"]
+        # A released submission with nothing actually marked on it shows
+        # no mark, rather than zero out of the paper's total.
+        if totals["graded_count"]:
+            earned, max_score = totals["earned"], totals["max"]
 
     return StudentAssignment(
         question_id=q.id,

@@ -19,6 +19,8 @@ from models import (
 from schemas import (
     AnswerGradeOut,
     BulkGradeStarted,
+    BulkReleaseRequest,
+    BulkReleaseResult,
     BulkGradeRequest,
     GradeOverride,
     GradeRunRequest,
@@ -436,6 +438,48 @@ def release_grades(
     sub.released_at = datetime.now(timezone.utc)
     db.commit()
     return _grades_payload(db, sub)
+
+
+@router.post("/questions/{question_id}/release-all", response_model=BulkReleaseResult)
+def release_all_submissions(
+    question_id: str,
+    body: BulkReleaseRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Release, or withdraw, every marked submission on a paper at once.
+
+    Marking a class one script at a time is fine; publishing a class one
+    script at a time means some students see their result minutes before
+    others, and the teacher has to remember where they got to.
+
+    Only graded work is released. Ungraded submissions are reported back
+    as skipped rather than quietly passed over, since a teacher pressing
+    this expects the whole class to have been dealt with and needs to
+    know when it hasn't.
+    """
+    question = db.query(Question).filter(Question.id == question_id).first()
+    if question is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Question not found")
+
+    course = db.query(Course).filter(Course.id == question.course_id).first()
+    if user.role != "admin" and (course is None or course.teacher_id != user.id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Question not found")
+
+    submissions = db.query(Submission).filter(Submission.question_id == question_id).all()
+
+    changed = skipped = 0
+    now = datetime.now(timezone.utc)
+    for sub in submissions:
+        if body.released and sub.grading_status != "graded":
+            skipped += 1
+            continue
+        sub.released_at = now if body.released else None
+        changed += 1
+
+    db.commit()
+    return BulkReleaseResult(changed=changed, skipped=skipped)
 
 
 @router.post("/submissions/{submission_id}/unrelease", response_model=SubmissionGradesOut)

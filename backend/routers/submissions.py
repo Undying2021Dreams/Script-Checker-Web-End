@@ -395,8 +395,20 @@ def list_submissions(
                 # Withhold the marks themselves from a student until they're
                 # released — the list view must not leak what the detail
                 # view deliberately gates.
-                earned=totals["earned"] if (is_teacher or released) else None,
-                max_score=totals["max"] if (is_teacher or released) else None,
+                #
+                # Nothing marked yet reads as no mark rather than zero out
+                # of ten, which is what a teacher sees as a student who
+                # scored nothing.
+                earned=(
+                    totals["earned"]
+                    if (is_teacher or released) and totals["graded_count"]
+                    else None
+                ),
+                max_score=(
+                    totals["max"]
+                    if (is_teacher or released) and totals["graded_count"]
+                    else None
+                ),
                 needs_review_count=totals["needs_review_count"] if is_teacher else None,
             )
         )
