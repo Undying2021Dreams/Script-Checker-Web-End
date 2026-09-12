@@ -1,7 +1,7 @@
 import { useMsal } from '@azure/msal-react'
 import { useState } from 'react'
 
-import { LogoMark } from '@/components/Logo'
+import { Logo } from '@/components/Logo'
 import { Button } from '@/components/ui/button'
 import { Pending } from '@/components/ui/feedback'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -30,16 +30,7 @@ export function LoginPage() {
     <div className="flex min-h-svh flex-col items-center justify-center gap-6 px-4">
       {/* The one screen with room for the mark at a size where the
           circuit detail actually reads. */}
-      <div className="flex flex-col items-center gap-3 text-center">
-        <LogoMark className="size-16" />
-        <div>
-          <p className="text-2xl font-semibold tracking-tight">
-            <span className="text-primary">Auto</span>
-            <span className="text-success">Check</span>
-          </p>
-          <p className="mt-1 text-sm text-muted-foreground">Automating the boring stuff</p>
-        </div>
-      </div>
+      <Logo className="h-16" />
 
       <Card className="w-full max-w-sm">
         <CardHeader>

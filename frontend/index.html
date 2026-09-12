@@ -2,9 +2,20 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AutoCheck — automated script checking</title>
+
+    <!-- The link-preview card. Sent to a supervisor or pasted into a
+         chat, the URL otherwise renders as a bare address with no
+         indication of what it is. og:image does not reliably accept
+         SVG, so this one asset has to be a raster. -->
+    <meta property="og:title" content="AutoCheck" />
+    <meta property="og:description" content="Automated exam-script checking — author a paper, collect answers, mark them against your own scheme." />
+    <meta property="og:image" content="/og.png" />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="description" content="Automated exam-script checking — author a paper, collect answers, mark them against your own scheme." />
   </head>
   <body>
     <div id="root"></div>
