@@ -1,112 +1,42 @@
 import { useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 
-import { Badge } from '@/components/ui/badge'
+import { Pending, StatusPill } from '@/components/ui/feedback'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { apiFetchBlobUrl } from '@/lib/api'
-import { AuthedImage } from '@/components/AuthedImage'
-import { MathText } from '@/components/MathText'
-import { useAssignments, useSubmissionGrades, useUploadSubmission } from '@/lib/queries'
+import { useAssignments, useUploadSubmission } from '@/lib/queries'
 import type { StudentAssignment } from '@/lib/types'
 
 function MarkOrStatus({ a }: { a: StudentAssignment }) {
-  if (!a.submission_id) return <Badge variant="outline">Not submitted</Badge>
+  if (!a.submission_id) return <StatusPill>Not submitted</StatusPill>
 
   if (a.released && a.earned != null) {
     return (
-      <Badge variant="secondary">
+      <StatusPill tone="success">
         {a.earned} / {a.max_score}
-      </Badge>
+      </StatusPill>
     )
   }
 
   // Deliberately says the work arrived without hinting at the mark — an
   // unreleased mark is not the student's to see yet.
   if (a.submission_status === 'queued' || a.submission_status === 'grading') {
-    return <Badge variant="outline">Being marked</Badge>
+    return <StatusPill tone="info">Being marked</StatusPill>
   }
-  return <Badge variant="outline">Submitted</Badge>
+  return <StatusPill tone="info">Submitted</StatusPill>
 }
-
-/**
- * A student's own marks once the teacher has released them.
- *
- * The teacher's worked answer is shown beside each mark, not just the
- * mark and a comment: a student who wants to understand why they lost
- * two marks needs to see what the answer was meant to look like, and
- * the marking scheme the teacher wrote sits in that same block.
- */
-function MyResults({ submissionId }: { submissionId: string }) {
-  const [open, setOpen] = useState(false)
-  const { data, isLoading, error } = useSubmissionGrades(submissionId, open)
-
-  if (!open) {
-    return (
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-        See my marks and the solutions
-      </Button>
-    )
-  }
-
-  return (
-    <div className="space-y-3">
-      <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
-        Hide my marks
-      </Button>
-
-      {isLoading && <p className="text-sm text-muted-foreground">Loading your marks…</p>}
-      {error && <p className="text-sm text-destructive">{(error as Error).message}</p>}
-
-      {data?.grades.map((g) => (
-        <div key={g.answer_box_id} className="space-y-2 rounded-md border p-3">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-sm font-medium">
-              {g.label || `Part ${g.order_index + 1}`}
-            </span>
-            <Badge variant="secondary">
-              {g.score ?? '—'} / {g.max_score}
-            </Badge>
-          </div>
-
-          {g.feedback && (
-            <p className="text-sm text-muted-foreground">
-              <MathText text={g.feedback} />
-            </p>
-          )}
-
-          {(g.model_answer_images.length > 0 || g.model_answer_text) && (
-            <div className="space-y-2 border-t pt-2">
-              <p className="text-xs font-medium text-muted-foreground">
-                Your teacher's solution
-              </p>
-              {g.model_answer_images.length > 0 ? (
-                g.model_answer_images.map((url) => (
-                  <AuthedImage
-                    key={url}
-                    path={url.replace(/^\/api/, '')}
-                    alt="Teacher's worked solution"
-                    className="max-w-full rounded border bg-white"
-                  />
-                ))
-              ) : (
-                <p className="text-sm">
-                  <MathText text={g.model_answer_text ?? ''} />
-                </p>
-              )}
-            </div>
-          )}
-        </div>
-      ))}
-    </div>
-  )
-}
-
 
 function AssignmentRow({ assignment }: { assignment: StudentAssignment }) {
   const fileRef = useRef<HTMLInputElement>(null)
   const [modality, setModality] = useState('photo')
   const upload = useUploadSubmission(assignment.question_id)
+
+  // The server refuses a replacement once the work is marked; the UI
+  // stops offering one rather than letting the student pick a file and
+  // meet a 409.
+  const locked = assignment.submission_status === 'graded' || assignment.released
 
   const openPaper = async () => {
     try {
@@ -157,40 +87,60 @@ function AssignmentRow({ assignment }: { assignment: StudentAssignment }) {
           Open paper
         </Button>
 
-        <select
-          value={modality}
-          onChange={(e) => setModality(e.target.value)}
-          className="rounded-md border bg-transparent px-2 py-1 text-xs"
-          title="How you captured the page"
-        >
-          <option value="photo">Photo</option>
-          <option value="scanner">Scanner</option>
-        </select>
+        {!locked && (
+          <>
+            <select
+              value={modality}
+              onChange={(e) => setModality(e.target.value)}
+              className="rounded-md border bg-background px-2 py-1 text-xs"
+              title="How you captured the page"
+            >
+              <option value="photo">Photo</option>
+              <option value="scanner">Scanner</option>
+            </select>
 
-        <Button size="sm" onClick={() => fileRef.current?.click()} disabled={upload.isPending}>
-          {upload.isPending
-            ? 'Uploading…'
-            : assignment.submission_id
-              ? 'Replace my answer'
-              : 'Upload my answer'}
-        </Button>
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/jpeg,image/png,image/webp,application/pdf"
-          onChange={handleFile}
-          className="hidden"
-        />
+            <Button size="sm" onClick={() => fileRef.current?.click()} disabled={upload.isPending}>
+              {upload.isPending ? (
+                <Pending>Uploading…</Pending>
+              ) : assignment.submission_id ? (
+                'Replace my answer'
+              ) : (
+                'Upload my answer'
+              )}
+            </Button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,application/pdf"
+              onChange={handleFile}
+              className="hidden"
+            />
+          </>
+        )}
+
+        {assignment.released && assignment.submission_id && (
+          <Button
+            size="sm"
+            nativeButton={false}
+            render={<Link to={`/results/${assignment.submission_id}`}>See my result</Link>}
+          />
+        )}
       </div>
 
-      {assignment.submission_id && !assignment.released && (
+      {/* Once the work has been marked it cannot be swapped for another
+          attempt — the mark on record has to belong to the work on
+          record, and a released result comes with the solution. Saying
+          so beats a button that fails when pressed. */}
+      {locked && (
         <p className="text-xs text-muted-foreground">
-          Your teacher hasn't released marks for this yet.
+          This has been marked, so it can no longer be replaced.
         </p>
       )}
 
-      {assignment.submission_id && assignment.released && (
-        <MyResults submissionId={assignment.submission_id} />
+      {assignment.submission_id && !assignment.released && !locked && (
+        <p className="text-xs text-muted-foreground">
+          Your teacher hasn't released marks for this yet.
+        </p>
       )}
     </div>
   )
