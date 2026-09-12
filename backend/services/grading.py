@@ -212,6 +212,46 @@ def pair_answer_boxes_with_ground_truth(content_doc: dict | None) -> dict[str, l
     return pairing
 
 
+# A teacher writes "1. correct substitution - 5 marks. 2. correct answer
+# - 5 marks" into the model answer. That is already a complete statement
+# of what the part is worth, so asking them to type 10 into a separate
+# field as well is asking the same question twice — and the two drift
+# apart silently, which is exactly what happened: boxes defaulting to one
+# mark while the scheme beside them was worth ten.
+_SCHEME_TOTAL_RE = re.compile(r"total[^.\n]{0,24}?(\d+(?:\.\d+)?)\s*marks?\b", re.IGNORECASE)
+_SCHEME_ITEM_RE = re.compile(r"(\d+(?:\.\d+)?)\s*marks?\b", re.IGNORECASE)
+
+
+def marking_scheme_total(text: str | None) -> int | None:
+    """
+    What a marking scheme adds up to, or None if it doesn't state one.
+
+    An explicit total wins over summing the parts: a scheme that ends
+    "Total: 10 marks" would otherwise count its own summary as another
+    criterion and come to twenty.
+
+    Returns None rather than guessing whenever the answer would be
+    unsound — no mention of marks at all, or a total that isn't a whole
+    number, since a box is worth a whole number of marks. The caller
+    leaves the existing value alone in that case.
+    """
+    if not text:
+        return None
+
+    explicit = _SCHEME_TOTAL_RE.search(text)
+    if explicit:
+        value = float(explicit.group(1))
+    else:
+        found = _SCHEME_ITEM_RE.findall(text)
+        if not found:
+            return None
+        value = sum(float(n) for n in found)
+
+    if value <= 0 or value != int(value):
+        return None
+    return int(value)
+
+
 def question_text_by_ground_truth_box(content_doc: dict | None) -> dict[str, str]:
     """Sub-question text preceding each groundTruthBox, as plain text."""
     result: dict[str, str] = {}

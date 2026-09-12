@@ -8,10 +8,22 @@ import { SubmissionsCard } from '@/components/SubmissionsCard'
 import QuestionEditor from '@/components/editor/QuestionEditor'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
 import { apiFetch, apiFetchBlobUrl } from '@/lib/api'
 import { Input } from '@/components/ui/input'
 import {
   useCloneQuestion,
+  useDeleteQuestion,
   useFinalizeQuestion,
   useQuestion,
   useRenameQuestion,
@@ -20,6 +32,81 @@ import {
 import type { QuestionDocPayload } from '@/lib/types'
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
+
+/**
+ * Remove a paper and everything students did on it.
+ *
+ * Confirmation is typed rather than clicked. This destroys work that
+ * belongs to other people — every submission, every mark, released or
+ * not — and none of it can be recovered, so it should not be one
+ * mis-aimed click away from a button that sits beside "Edit as a new
+ * copy".
+ */
+function DeleteQuestionButton({
+  questionId,
+  courseId,
+}: {
+  questionId: string
+  courseId: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [typed, setTyped] = useState('')
+  const navigate = useNavigate()
+  const remove = useDeleteQuestion(questionId)
+
+  const confirmed = typed.trim().toLowerCase() === 'delete'
+
+  const handleDelete = async () => {
+    try {
+      const result = await remove.mutateAsync()
+      toast.success(
+        result.submissions_deleted
+          ? `Assignment deleted, along with ${result.submissions_deleted} submission(s) and ${result.marks_deleted} mark(s).`
+          : 'Assignment deleted.',
+      )
+      navigate(`/courses/${courseId}`)
+    } catch (err) {
+      toast.error((err as Error).message)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger render={<Button variant="ghost">Delete</Button>} />
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Delete this assignment?</DialogTitle>
+          <DialogDescription>
+            Every submission students made against this paper goes with it, along with every
+            mark and comment, released or not. This cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-2">
+          <Label htmlFor="confirm-delete">Type DELETE to confirm</Label>
+          <Input
+            id="confirm-delete"
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            placeholder="DELETE"
+            autoComplete="off"
+          />
+        </div>
+
+        <DialogFooter>
+          <DialogClose render={<Button variant="ghost">Cancel</Button>} />
+          <Button
+            variant="destructive"
+            onClick={handleDelete}
+            disabled={!confirmed || remove.isPending}
+          >
+            {remove.isPending ? 'Deleting…' : 'Delete assignment'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
 
 export function QuestionEditorPage() {
   const { questionId = '' } = useParams()
@@ -186,6 +273,7 @@ export function QuestionEditorPage() {
               <Button variant="outline" onClick={handleClone} disabled={clone.isPending}>
                 {clone.isPending ? 'Copying…' : 'Edit as a new copy'}
               </Button>
+              <DeleteQuestionButton questionId={questionId} courseId={question.course_id} />
             </>
           ) : (
             <Button onClick={handleFinalize} disabled={finalize.isPending}>

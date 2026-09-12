@@ -144,6 +144,18 @@ export function useCloneQuestion(questionId: string) {
   })
 }
 
+export function useDeleteQuestion(questionId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      apiFetch<{ deleted: string; submissions_deleted: number; marks_deleted: number }>(
+        `/questions/${questionId}`,
+        { method: 'DELETE' },
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['questions'] }),
+  })
+}
+
 export function useFinalizeQuestion(questionId: string) {
   const qc = useQueryClient()
   return useMutation({
