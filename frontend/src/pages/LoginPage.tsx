@@ -2,6 +2,7 @@ import { useMsal } from '@azure/msal-react'
 import { useState } from 'react'
 
 import { Logo } from '@/components/Logo'
+import { ThemeToggle } from '@/components/ThemeToggle'
 import { Button } from '@/components/ui/button'
 import { Pending } from '@/components/ui/feedback'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -27,7 +28,10 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-svh flex-col items-center justify-center gap-6 px-4">
+    <div className="relative flex min-h-svh flex-col items-center justify-center gap-6 px-4">
+      <div className="absolute top-4 right-4">
+        <ThemeToggle />
+      </div>
       {/* The one screen with room for the mark at a size where the
           circuit detail actually reads. */}
       <Logo className="h-16" />

@@ -2,6 +2,7 @@ import { useMsal } from '@azure/msal-react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
 
 import { Logo } from '@/components/Logo'
+import { ThemeToggle } from '@/components/ThemeToggle'
 import { Button } from '@/components/ui/button'
 import { useMe } from '@/lib/queries'
 
@@ -43,6 +44,7 @@ export function AppLayout() {
                 one course and take another — the label belongs on the
                 course, and that is where it now appears. */}
             {me && <span className="text-sm text-muted-foreground">{me.display_name}</span>}
+            <ThemeToggle />
             <Button variant="outline" size="sm" onClick={() => instance.logoutPopup()}>
               Sign out
             </Button>
