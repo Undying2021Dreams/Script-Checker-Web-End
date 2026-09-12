@@ -56,7 +56,7 @@ WORKDIR /app
 # libgl1/libglib2.0-0: OpenCV links against these even headless.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        poppler-utils libzbar0 libgl1 libglib2.0-0 curl \
+        poppler-utils libzbar0 libgl1 libglib2.0-0 curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt .
@@ -66,6 +66,21 @@ COPY backend/requirements.txt .
 # scratch, and split the two steps so a network failure in one doesn't
 # discard the layer the other already produced.
 RUN pip install --no-cache-dir --retries 5 --timeout 120 -r requirements.txt
+# Trust what the operating system trusts, as well as what certifi ships.
+#
+# httpx — and so the Entra token validation that every authenticated
+# request depends on — verifies against certifi's bundle, not the system
+# one. From Korea Central, login.microsoftonline.com is served with a
+# chain whose root is in Debian's store but not in certifi's, so token
+# validation failed with "unable to get local issuer certificate" while
+# the very same image, run from another network, was fine. Every request
+# needing a signed-in user returned "Unable to validate token", and
+# nothing in the application had changed.
+#
+# Appended rather than replaced: this adds the operating system's roots
+# without discarding certifi's curation.
+RUN cat /etc/ssl/certs/ca-certificates.crt >> "$(python -c 'import certifi; print(certifi.where())')"
+
 RUN python -m playwright install --with-deps chromium \
     && chmod -R a+rX /ms-playwright
 
