@@ -30,6 +30,10 @@ class CourseOut(BaseModel):
     archived: bool
     created_at: datetime
     student_count: int
+    # What the person asking stands in relation to this course. A role is
+    # a property of a person *and a course*, not of a person: whoever
+    # teaches Numerical Methods may well be taking Compilers.
+    my_role: Literal["teacher", "student"] = "student"
 
 
 class CourseSummary(BaseModel):

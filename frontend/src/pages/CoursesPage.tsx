@@ -3,7 +3,8 @@ import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
-import { CardSkeleton, EmptyState, Pending } from '@/components/ui/feedback'
+import { CardSkeleton, EmptyState, Pending, StatusPill } from '@/components/ui/feedback'
+import type { Course } from '@/lib/types'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Dialog,
@@ -109,16 +110,70 @@ function JoinCourseDialog() {
   )
 }
 
+/**
+ * One card, told from the point of view the course puts you in.
+ *
+ * A teacher wants the join code and how many have enrolled; a student
+ * wants to know whose course it is. Which of the two you are is a fact
+ * about this course, not about you — the same person can be either, on
+ * different rows of the same page.
+ */
+function CourseCard({ course }: { course: Course }) {
+  const teaching = course.my_role === 'teacher'
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-start justify-between gap-2 text-base">
+          <Link to={`/courses/${course.id}`} className="hover:underline">
+            {course.title}
+          </Link>
+          <StatusPill tone={teaching ? 'success' : 'info'}>
+            {teaching ? 'Teaching' : 'Taking'}
+          </StatusPill>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-1 text-sm text-muted-foreground">
+        {teaching ? (
+          <>
+            <p>{course.student_count} enrolled</p>
+            <p>
+              Join code: <span className="font-mono tracking-widest">{course.join_code}</span>
+            </p>
+          </>
+        ) : (
+          <p>Taught by {course.teacher_name}</p>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 export function CoursesPage() {
   const { data: me } = useMe()
   const { data: courses, isLoading, error } = useMyCourses()
-  const isTeacher = me?.role === 'teacher' || me?.role === 'admin'
+
+  // The one permission that really is global: whether you may start a
+  // course of your own. Everything else about being a teacher or a
+  // student is decided per course.
+  const canCreateCourses = me?.role === 'teacher' || me?.role === 'admin'
+
+  const teaching = courses?.filter((c) => c.my_role === 'teacher') ?? []
+  const taking = courses?.filter((c) => c.my_role === 'student') ?? []
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">My courses</h1>
-        {me && (isTeacher ? <CreateCourseDialog /> : <JoinCourseDialog />)}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold tracking-tight">My courses</h1>
+        {/* Both, always. Whoever teaches one course may be taking
+            another, and offering only one of these was what made that
+            impossible. */}
+        {me && (
+          <div className="flex items-center gap-2">
+            {canCreateCourses && <CreateCourseDialog />}
+            <JoinCourseDialog />
+          </div>
+        )}
       </div>
 
       {isLoading && (
@@ -131,36 +186,36 @@ export function CoursesPage() {
 
       {courses?.length === 0 && (
         <EmptyState
-          title={isTeacher ? 'No courses yet' : 'You haven’t joined any courses yet'}
+          title="Nothing here yet"
           hint={
-            isTeacher
-              ? 'Create one to get a join code you can give your students.'
+            canCreateCourses
+              ? 'Create a course to get a join code for your students, or join one with a code someone gave you.'
               : 'Ask your teacher for a join code, or search for a course.'
           }
         />
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        {courses?.map((course) => (
-          <Card key={course.id}>
-            <CardHeader>
-              <CardTitle>
-                <Link to={`/courses/${course.id}`} className="hover:underline">
-                  {course.title}
-                </Link>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-1 text-sm text-muted-foreground">
-              <p>{isTeacher ? `${course.student_count} enrolled` : course.teacher_name}</p>
-              {isTeacher && (
-                <p>
-                  Join code: <span className="font-mono tracking-widest">{course.join_code}</span>
-                </p>
-              )}
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      {teaching.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-sm font-medium text-muted-foreground">Courses I teach</h2>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {teaching.map((course) => (
+              <CourseCard key={course.id} course={course} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {taking.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-sm font-medium text-muted-foreground">Courses I'm taking</h2>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {taking.map((course) => (
+              <CourseCard key={course.id} course={course} />
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   )
 }

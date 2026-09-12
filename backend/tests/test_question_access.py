@@ -510,3 +510,42 @@ def test_another_teacher_cannot_delete_your_question(client, db, make_user):
 
     assert client.as_user(other).delete(f"/api/questions/{q.id}").status_code == 404
     assert db.query(Question).filter(Question.id == q.id).first() is not None
+
+
+# ── Someone can teach one course and study another ──────────────────
+
+def test_a_teacher_sees_both_what_they_teach_and_what_they_take(client, db, make_user):
+    """
+    The course list used to branch on the global role, so whoever taught
+    anything could never see a course they were taking. A role belongs
+    to a person *and a course*, not to a person.
+    """
+    from models import Course, Enrollment
+
+    person = make_user(role="teacher")
+    colleague = make_user(role="teacher")
+
+    mine = Course(title="Numerical Methods", join_code="NM0013", teacher_id=person.id)
+    theirs = Course(title="Compilers", join_code="CO0013", teacher_id=colleague.id)
+    db.add_all([mine, theirs])
+    db.commit()
+    db.add(Enrollment(course_id=theirs.id, student_id=person.id))
+    db.commit()
+
+    listed = client.as_user(person).get("/api/courses").json()
+    by_title = {c["title"]: c["my_role"] for c in listed}
+
+    assert by_title == {"Numerical Methods": "teacher", "Compilers": "student"}
+
+
+def test_you_cannot_enrol_in_your_own_course(client, db, make_user):
+    from models import Course
+
+    person = make_user(role="teacher")
+    course = Course(title="NM", join_code="NM0014", teacher_id=person.id)
+    db.add(course)
+    db.commit()
+
+    res = client.as_user(person).post("/api/courses/join", json={"join_code": "NM0014"})
+    assert res.status_code == 409
+    assert "teach this course" in res.json()["detail"]

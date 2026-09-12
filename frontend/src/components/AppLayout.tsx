@@ -2,7 +2,6 @@ import { useMsal } from '@azure/msal-react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
 
 import { Logo } from '@/components/Logo'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useMe } from '@/lib/queries'
 
@@ -39,12 +38,11 @@ export function AppLayout() {
           </nav>
 
           <div className="ml-auto flex items-center gap-3">
-            {me && (
-              <span className="flex items-center gap-2 text-sm text-muted-foreground">
-                {me.display_name}
-                <Badge variant="secondary">{me.role}</Badge>
-              </span>
-            )}
+            {/* No role badge. "You are a student" stopped being a true
+                statement about a person once the same account could teach
+                one course and take another — the label belongs on the
+                course, and that is where it now appears. */}
+            {me && <span className="text-sm text-muted-foreground">{me.display_name}</span>}
             <Button variant="outline" size="sm" onClick={() => instance.logoutPopup()}>
               Sign out
             </Button>
