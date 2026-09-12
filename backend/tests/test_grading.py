@@ -736,3 +736,33 @@ def test_model_answer_is_withheld_until_marks_are_released(client, graded_setup,
     marked = next(g for g in body["grades"] if g["answer_box_id"] == "a1")
     assert marked["model_answer_text"] == "x = 3"
     assert marked["feedback"] == "ok"
+
+
+# ── Marks come from the scheme the teacher already wrote ────────────
+
+@pytest.mark.parametrize("scheme,expected", [
+    ("1. For correct substitution - 5 marks. 2. For the answer - 5 marks.", 10),
+    ("Award 2 marks for the method and 3 marks for the answer. Total: 5 marks", 5),
+    ("Worth 4 marks.", 4),
+    ("0.5 marks for each of the two steps: 0.5 marks, 0.5 marks", None),
+    ("x = 3", None),
+    ("", None),
+    (None, None),
+])
+def test_marking_scheme_total(scheme, expected):
+    """
+    An explicit total wins over summing the parts, or a scheme ending
+    "Total: 5 marks" counts its own summary as another criterion and
+    comes to ten. Anything that can't be read soundly returns None so
+    the caller leaves the existing value alone rather than guessing.
+    """
+    from services.grading import marking_scheme_total
+
+    assert marking_scheme_total(scheme) == expected
+
+
+def test_a_half_mark_scheme_is_left_alone():
+    """Boxes carry whole marks, so a scheme totalling 1.5 is not applied."""
+    from services.grading import marking_scheme_total
+
+    assert marking_scheme_total("1 mark for setup, 0.5 marks for the answer") is None

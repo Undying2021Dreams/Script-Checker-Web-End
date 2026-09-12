@@ -35,10 +35,12 @@ from sqlalchemy.orm import Session
 from config import settings
 from database import get_db
 from models import (
-    Question, AnswerBox, UploadedImage, QuestionPdf, GroundTruthBox,
-    GroundTruthImage, QuestionImage, Course, User,
+    Question, AnswerBox, AnswerGrade, Submission, UploadedImage, QuestionPdf,
+    GroundTruthBox, GroundTruthImage, QuestionImage, Course, User,
 )
 from ratelimit import HEAVY_CPU_LIMIT, LLM_LIMIT, limiter
+from services.grading import marking_scheme_total, pair_answer_boxes_with_ground_truth
+from services.llm_provider import extract_plain_text as _extract_plain_text
 from security import get_current_user, require_teacher
 from schemas import (
     AnswerBoxMarks,
@@ -847,6 +849,32 @@ def finalize_question(request: Request, question_id: str, user: User = Depends(r
         except Exception as e:
             logger.warning("Failed to render ground truth box %s: %s", gt_box.id, e)
 
+    # What each part is worth, taken from the marking scheme the teacher
+    # already wrote into its model answer.
+    #
+    # Asking for it again in a separate field asks the same question
+    # twice, and the two answers drift: boxes default to one mark, so a
+    # scheme worth ten was being marked out of one, and a correct answer
+    # came back as 0.5. The scheme is the teacher's own statement of what
+    # the part is worth, so it decides. Where it states no marks at all
+    # the existing value stands, and either way the teacher can change it
+    # afterwards from the review screen.
+    pairing = pair_answer_boxes_with_ground_truth(q.content)
+    gt_text = {
+        b.id: _extract_plain_text(b.content or {}) for b in q.ground_truth_boxes
+    }
+    for box in q.answer_boxes:
+        scheme = "\n".join(
+            gt_text.get(gt_id, "") for gt_id in pairing.get(box.id, [])
+        )
+        total = marking_scheme_total(scheme)
+        if total is not None and total != box.points:
+            logger.info(
+                "Answer box %s set to %s marks from its marking scheme (was %s)",
+                box.id, total, box.points,
+            )
+            box.points = total
+
     q.state = "finalized"
     q.finalized_at = datetime.now(timezone.utc)
 
@@ -877,6 +905,57 @@ def export_pdf(question_id: str, user: User = Depends(require_teacher), db: Sess
 
     from fastapi.responses import Response
     return Response(content=pdf.data, media_type="application/pdf")
+
+
+@router.delete("/{question_id}")
+def delete_question(
+    question_id: str,
+    user: User = Depends(require_teacher),
+    db: Session = Depends(get_db),
+):
+    """
+    Remove a paper and everything that happened on it.
+
+    Two foreign keys here do not cascade, and Postgres enforces both, so
+    the order matters. Submissions reference the question without
+    ON DELETE CASCADE — deleting the question first fails outright — and
+    a clone keeps `derived_from` pointing at the paper it came from, so
+    an original cannot be removed while a copy of it survives.
+
+    Everything hanging off a submission — marks, crops, uploaded pages —
+    does cascade from the submission, so deleting those rows is enough to
+    take the student work with them.
+    """
+    q = _get_question_or_404(question_id, db, user)
+
+    submissions = db.query(Submission).filter(Submission.question_id == q.id).all()
+    submission_ids = [s.id for s in submissions]
+
+    grade_count = 0
+    if submission_ids:
+        grade_count = (
+            db.query(AnswerGrade)
+            .filter(AnswerGrade.submission_id.in_(submission_ids))
+            .count()
+        )
+        db.query(Submission).filter(Submission.id.in_(submission_ids)).delete(
+            synchronize_session=False
+        )
+
+    # A clone outlives the paper it was copied from; it just stops
+    # claiming descent from something that no longer exists.
+    db.query(Question).filter(Question.derived_from == q.id).update(
+        {"derived_from": None}, synchronize_session=False
+    )
+
+    db.delete(q)
+    db.commit()
+
+    return {
+        "deleted": q.id,
+        "submissions_deleted": len(submission_ids),
+        "marks_deleted": grade_count,
+    }
 
 
 @router.post("/{question_id}/clone", response_model=QuestionOut, status_code=201)

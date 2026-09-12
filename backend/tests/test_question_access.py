@@ -443,3 +443,70 @@ def test_another_teacher_cannot_change_your_marks(client, db, make_user):
         f"/api/questions/{q.id}/answer-boxes/abx2", json={"points": 10}
     )
     assert res.status_code == 404
+
+
+# ── Deleting a paper ────────────────────────────────────────────────
+
+def test_deleting_a_question_takes_its_submissions_with_it(client, db, make_user):
+    """
+    Two foreign keys here do not cascade and Postgres enforces both, so
+    this is as much about ordering as about permissions: submissions
+    point at the question without ON DELETE CASCADE, and a clone points
+    at the paper it was copied from.
+    """
+    from models import AnswerBox, AnswerGrade, Course, CropImage, Question, Submission
+
+    teacher = make_user(role="teacher")
+    student = make_user(role="student")
+    course = Course(title="NM", join_code="NM0011", teacher_id=teacher.id)
+    db.add(course)
+    db.commit()
+
+    q = Question(course_id=course.id, created_by=teacher.id, state="finalized", content={})
+    db.add(q)
+    db.flush()
+    db.add(AnswerBox(id="dbx", question_id=q.id, label="a", points=5, order_index=0))
+
+    clone = Question(course_id=course.id, created_by=teacher.id, state="draft",
+                     content={}, derived_from=q.id)
+    db.add(clone)
+
+    sub = Submission(question_id=q.id, student_id=student.id, modality="photo", manifest={})
+    db.add(sub)
+    db.flush()
+    db.add(CropImage(submission_id=sub.id, answer_box_id="dbx", part=0, data=b"CROP"))
+    db.add(AnswerGrade(submission_id=sub.id, answer_box_id="dbx", max_score=5, llm_score=3))
+    db.commit()
+    sub_id, clone_id, q_id = sub.id, clone.id, q.id
+
+    res = client.as_user(teacher).delete(f"/api/questions/{q_id}")
+    assert res.status_code == 200, res.text
+    assert res.json()["submissions_deleted"] == 1
+    assert res.json()["marks_deleted"] == 1
+
+    db.expire_all()
+    assert db.query(Question).filter(Question.id == q_id).first() is None
+    assert db.query(Submission).filter(Submission.id == sub_id).first() is None
+    assert db.query(AnswerGrade).filter(AnswerGrade.submission_id == sub_id).count() == 0
+    assert db.query(CropImage).filter(CropImage.submission_id == sub_id).count() == 0
+
+    # The clone survives; it just stops claiming descent from something
+    # that no longer exists.
+    surviving = db.query(Question).filter(Question.id == clone_id).one()
+    assert surviving.derived_from is None
+
+
+def test_another_teacher_cannot_delete_your_question(client, db, make_user):
+    from models import Course, Question
+
+    teacher = make_user(role="teacher")
+    other = make_user(role="teacher")
+    course = Course(title="NM", join_code="NM0012", teacher_id=teacher.id)
+    db.add(course)
+    db.commit()
+    q = Question(course_id=course.id, created_by=teacher.id, state="finalized", content={})
+    db.add(q)
+    db.commit()
+
+    assert client.as_user(other).delete(f"/api/questions/{q.id}").status_code == 404
+    assert db.query(Question).filter(Question.id == q.id).first() is not None
