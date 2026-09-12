@@ -1,6 +1,7 @@
 import { useState } from 'react'
 
 import { AuthedImage } from '@/components/AuthedImage'
+import { PaperSurface } from '@/components/Paper'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -25,28 +26,35 @@ function PreviewPane({
   imageId,
   pathPrefix,
   alt,
+  kind,
   onZoom,
 }: {
   label: string
   imageId: string | null | undefined
   pathPrefix: string
   alt: string
+  kind: 'student' | 'model' | 'page'
   onZoom: (z: Zoomed) => void
 }) {
   const path = imageId ? `${pathPrefix}/${imageId}` : null
 
   return (
     <div className="space-y-1">
-      <p className="text-xs text-muted-foreground">{label}</p>
       {path ? (
-        <button
-          type="button"
-          onClick={() => onZoom({ path, title: alt })}
-          className="block w-full cursor-zoom-in rounded border bg-white transition hover:ring-2 hover:ring-ring"
-          title="Click to enlarge"
+        <PaperSurface
+          caption={label}
+          kind={kind}
+          actions={<span className="text-muted-foreground">click to enlarge</span>}
         >
-          <AuthedImage path={path} alt={alt} className="w-full rounded" />
-        </button>
+          <button
+            type="button"
+            onClick={() => onZoom({ path, title: alt })}
+            className="block w-full cursor-zoom-in transition hover:brightness-[0.98]"
+            title="Click to enlarge"
+          >
+            <AuthedImage path={path} alt={alt} className="block w-full" />
+          </button>
+        </PaperSurface>
       ) : (
         <p className="text-sm text-muted-foreground">Not rendered</p>
       )}
@@ -95,14 +103,16 @@ export function AnswerKeyPreview({ questionId, enabled }: { questionId: string; 
 
               <div className="grid gap-4 md:grid-cols-2">
                 <PreviewPane
-                  label="Question shown to the student"
+                  label="The question, as the student sees it"
+                  kind="page"
                   imageId={box.question_image_id}
                   pathPrefix="/questions/question-images"
                   alt={`Question — ${name}`}
                   onZoom={setZoomed}
                 />
                 <PreviewPane
-                  label="Model answer"
+                  label="Model answer, with the marking scheme"
+                  kind="model"
                   imageId={box.image_id}
                   pathPrefix="/questions/ground-truth-images"
                   alt={`Model answer — ${name}`}

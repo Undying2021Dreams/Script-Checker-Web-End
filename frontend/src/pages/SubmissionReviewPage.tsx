@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
-import { AuthedImage } from '@/components/AuthedImage'
+import { PaperImage } from '@/components/Paper'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CardSkeleton, Pending, Skeleton, StatusPill } from '@/components/ui/feedback'
@@ -226,19 +226,18 @@ function GradeRow({
           )}
           {box.parts.map((part) => (
             <div key={part.part} className="space-y-1">
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <span>
-                  Part {part.part + 1}
-                  {part.page_index != null && ` · page ${part.page_index + 1}`}
-                </span>
+              <PaperImage
+                kind="student"
+                path={cropPath(part.crop_url)}
+                alt={`Answer ${box.label} part ${part.part + 1}`}
+                caption={`The student's answer · part ${part.part + 1}${
+                  part.page_index != null ? ` · page ${part.page_index + 1}` : ''
+                }`}
+              />
+              <div className="flex items-center gap-2 px-1 text-xs text-muted-foreground">
                 <QrBadge qr={part.qr_check} />
                 {part.registration && <span>{part.registration} alignment</span>}
               </div>
-              <AuthedImage
-                path={cropPath(part.crop_url)}
-                alt={`Answer ${box.label} part ${part.part + 1}`}
-                className="max-w-full rounded border bg-white"
-              />
             </div>
           ))}
         </div>
