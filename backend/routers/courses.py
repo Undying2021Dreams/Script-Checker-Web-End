@@ -47,7 +47,7 @@ def _student_counts(db: Session, course_ids: list[str]) -> dict[str, int]:
     return {course_id: count for course_id, count in rows}
 
 
-def _to_course_out(course: Course, student_count: int) -> CourseOut:
+def _to_course_out(course: Course, student_count: int, my_role: str = "student") -> CourseOut:
     return CourseOut(
         id=course.id,
         title=course.title,
@@ -57,6 +57,7 @@ def _to_course_out(course: Course, student_count: int) -> CourseOut:
         archived=course.archived,
         created_at=course.created_at,
         student_count=student_count,
+        my_role=my_role,
     )
 
 
@@ -93,7 +94,7 @@ def create_course(
     db.add(course)
     db.commit()
     db.refresh(course)
-    return _to_course_out(course, student_count=0)
+    return _to_course_out(course, student_count=0, my_role="teacher")
 
 
 @router.get("", response_model=list[CourseOut])
@@ -101,25 +102,37 @@ def list_my_courses(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Courses taught (teacher) or enrolled in (student)."""
-    if user.role in ("teacher", "admin"):
-        courses = (
-            db.query(Course)
-            .filter(Course.teacher_id == user.id)
-            .order_by(Course.created_at.desc())
-            .all()
-        )
-    else:
-        courses = (
-            db.query(Course)
-            .join(Enrollment, Enrollment.course_id == Course.id)
-            .filter(Enrollment.student_id == user.id)
-            .order_by(Course.created_at.desc())
-            .all()
-        )
+    """
+    Every course this person is part of, each labelled with how.
 
-    counts = _student_counts(db, [c.id for c in courses])
-    return [_to_course_out(c, counts.get(c.id, 0)) for c in courses]
+    Both lists, not one or the other. This used to branch on the global
+    role, which meant whoever taught anything could never see a course
+    they were taking — the teacher of Numerical Methods may perfectly
+    well be a student of Compilers, and the enrolment was simply
+    invisible to them.
+
+    Teaching a course you are also enrolled in cannot arise: joining a
+    course you teach is refused at the door.
+    """
+    taught = (
+        db.query(Course)
+        .filter(Course.teacher_id == user.id)
+        .order_by(Course.created_at.desc())
+        .all()
+    )
+    enrolled = (
+        db.query(Course)
+        .join(Enrollment, Enrollment.course_id == Course.id)
+        .filter(Enrollment.student_id == user.id)
+        .order_by(Course.created_at.desc())
+        .all()
+    )
+
+    counts = _student_counts(db, [c.id for c in taught + enrolled])
+    return [
+        *(_to_course_out(c, counts.get(c.id, 0), "teacher") for c in taught),
+        *(_to_course_out(c, counts.get(c.id, 0), "student") for c in enrolled),
+    ]
 
 
 @router.get("/search", response_model=list[CourseSummary])
@@ -190,7 +203,7 @@ def join_course(
         db.commit()
 
     counts = _student_counts(db, [course.id])
-    return _to_course_out(course, counts.get(course.id, 0))
+    return _to_course_out(course, counts.get(course.id, 0), "student")
 
 
 @router.get("/{course_id}", response_model=CourseOut)
@@ -202,7 +215,11 @@ def get_course(
     course = _get_course_or_404(course_id, db)
     _assert_can_view(course, user, db)
     counts = _student_counts(db, [course.id])
-    return _to_course_out(course, counts.get(course.id, 0))
+    return _to_course_out(
+        course,
+        counts.get(course.id, 0),
+        "teacher" if course.teacher_id == user.id else "student",
+    )
 
 
 @router.get("/{course_id}/students", response_model=list[EnrolledStudent])

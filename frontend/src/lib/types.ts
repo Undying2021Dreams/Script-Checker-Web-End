@@ -14,6 +14,9 @@ export interface Course {
   archived: boolean
   created_at: string
   student_count: number
+  // How you relate to this course. Not a property of you: the same
+  // person teaches one course and takes another.
+  my_role: 'teacher' | 'student'
 }
 
 export interface CourseSummary {
