@@ -209,3 +209,21 @@ export interface CorrectnessResult {
   suggested_question: string | null
   suggested_answer: string | null
 }
+
+export interface LeaderboardEntry {
+  rank: number
+  // Null for classmates: a named ranking publishes the standing of
+  // whoever is last.
+  display_name: string | null
+  earned: number
+  max_score: number
+  is_me: boolean
+}
+
+export interface Leaderboard {
+  entries: LeaderboardEntry[]
+  my_rank: number | null
+  ranked: number
+  class_average: number | null
+  named: boolean
+}

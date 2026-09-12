@@ -50,6 +50,27 @@ class CourseSummary(BaseModel):
     student_count: int
 
 
+class LeaderboardEntry(BaseModel):
+    rank: int
+    # Null for everyone but the person asking, unless they teach the
+    # course. A ranking that names classmates publishes the standing of
+    # whoever is at the bottom of it, and they did not ask for that.
+    display_name: str | None
+    earned: float
+    max_score: float
+    is_me: bool
+
+
+class LeaderboardOut(BaseModel):
+    entries: list[LeaderboardEntry]
+    my_rank: int | None
+    # How many people have a released mark at all, which is what the
+    # ranks are out of.
+    ranked: int
+    class_average: float | None
+    named: bool
+
+
 class JoinRequest(BaseModel):
     join_code: str = Field(min_length=1, max_length=32)
 

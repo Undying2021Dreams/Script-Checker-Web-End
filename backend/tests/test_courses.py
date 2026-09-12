@@ -180,3 +180,114 @@ def test_search_never_leaks_join_codes(client, make_user):
     assert results
     # A searchable join code would let anyone enroll in any course
     assert all("join_code" not in c for c in results)
+
+
+# ── Leaderboard ─────────────────────────────────────────────────────
+
+def _released_result(db, course, question, student, earned, out_of):
+    """A released submission worth `earned` of `out_of`."""
+    from models import AnswerBox, AnswerGrade, Submission
+    from datetime import datetime, timezone
+    import uuid
+
+    box_id = f"lb-{uuid.uuid4().hex[:8]}"
+    db.add(AnswerBox(id=box_id, question_id=question.id, label="a",
+                     points=out_of, order_index=0))
+    sub = Submission(question_id=question.id, student_id=student.id,
+                     modality="photo", manifest={}, grading_status="graded",
+                     released_at=datetime.now(timezone.utc))
+    db.add(sub)
+    db.flush()
+    db.add(AnswerGrade(submission_id=sub.id, answer_box_id=box_id,
+                       max_score=out_of, llm_score=earned))
+    db.commit()
+    return sub
+
+
+def _course_with_results(db, make_user):
+    from models import Course, Enrollment, Question
+
+    teacher = make_user(role="teacher")
+    top = make_user(role="student", display_name="Top")
+    middle = make_user(role="student", display_name="Middle")
+
+    course = Course(title="NM", join_code="LB0001", teacher_id=teacher.id)
+    db.add(course)
+    db.commit()
+    db.add_all([
+        Enrollment(course_id=course.id, student_id=top.id),
+        Enrollment(course_id=course.id, student_id=middle.id),
+    ])
+    q = Question(course_id=course.id, created_by=teacher.id, state="finalized", content={})
+    db.add(q)
+    db.commit()
+
+    _released_result(db, course, q, top, earned=9, out_of=10)
+    _released_result(db, course, q, middle, earned=4, out_of=10)
+    return teacher, top, middle, course, q
+
+
+def test_a_student_sees_their_own_rank_but_not_their_classmates_names(client, db, make_user):
+    """
+    A ranking that names classmates publishes the standing of whoever is
+    last, and they did not ask for that. The distribution and your own
+    position carry the motivation without the exposure.
+    """
+    _, top, middle, course, _ = _course_with_results(db, make_user)
+
+    body = client.as_user(middle).get(f"/api/courses/{course.id}/leaderboard").json()
+
+    assert body["named"] is False
+    assert body["my_rank"] == 2
+    assert body["ranked"] == 2
+    assert body["class_average"] == 6.5
+
+    mine = [e for e in body["entries"] if e["is_me"]]
+    assert len(mine) == 1 and mine[0]["display_name"] == "Middle"
+    assert [e["display_name"] for e in body["entries"] if not e["is_me"]] == [None]
+
+
+def test_the_teacher_sees_the_names(client, db, make_user):
+    """No new exposure: a teacher can already see every mark in the course."""
+    teacher, *_, course, _ = _course_with_results(db, make_user)
+
+    body = client.as_user(teacher).get(f"/api/courses/{course.id}/leaderboard").json()
+
+    assert body["named"] is True
+    assert [e["display_name"] for e in body["entries"]] == ["Top", "Middle"]
+    assert body["my_rank"] is None
+
+
+def test_unreleased_marks_are_not_ranked(client, db, make_user):
+    """
+    A ranking built from unreleased work would leak the order of results
+    before anyone had been told their own.
+    """
+    from models import Submission
+
+    _, top, middle, course, _ = _course_with_results(db, make_user)
+    db.query(Submission).filter(Submission.student_id == top.id).update({"released_at": None})
+    db.commit()
+
+    body = client.as_user(middle).get(f"/api/courses/{course.id}/leaderboard").json()
+    assert body["ranked"] == 1
+    assert body["my_rank"] == 1
+
+
+def test_an_outsider_cannot_read_the_leaderboard(client, db, make_user):
+    _, _, _, course, _ = _course_with_results(db, make_user)
+    outsider = make_user(role="student")
+    assert client.as_user(outsider).get(f"/api/courses/{course.id}/leaderboard").status_code in (403, 404)
+
+
+def test_popular_courses_are_ordered_by_enrolment(client, db, make_user):
+    _, _, _, course, _ = _course_with_results(db, make_user)
+    from models import Course
+
+    quiet = Course(title="Quiet", join_code="LB0002", teacher_id=course.teacher_id)
+    db.add(quiet)
+    db.commit()
+
+    body = client.as_user(make_user(role="student")).get("/api/courses/popular").json()
+    titles = [c["title"] for c in body]
+    assert titles.index("NM") < titles.index("Quiet")
