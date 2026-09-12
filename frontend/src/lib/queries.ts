@@ -267,6 +267,18 @@ export function useGradeAll(questionId: string) {
   })
 }
 
+export function useReleaseAll(questionId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (released: boolean) =>
+      apiFetch<{ changed: number; skipped: number }>(`/questions/${questionId}/release-all`, {
+        method: 'POST',
+        body: JSON.stringify({ released }),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['submissions', questionId] }),
+  })
+}
+
 export function useSubmissionAnswers(submissionId: string) {
   return useQuery({
     queryKey: ['answers', submissionId],

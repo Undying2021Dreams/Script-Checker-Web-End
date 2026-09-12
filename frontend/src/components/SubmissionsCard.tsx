@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useGradeAll, useSubmissions, useUploadSubmission } from '@/lib/queries'
+import { useGradeAll, useReleaseAll, useSubmissions, useUploadSubmission } from '@/lib/queries'
 import type { SubmissionSummary } from '@/lib/types'
 
 function StatusBadge({ submission }: { submission: SubmissionSummary }) {
@@ -38,6 +38,7 @@ export function SubmissionsCard({ questionId }: { questionId: string }) {
   const { data: submissions, isLoading, error } = useSubmissions(questionId)
   const upload = useUploadSubmission(questionId)
   const gradeAll = useGradeAll(questionId)
+  const releaseAll = useReleaseAll(questionId)
   const fileRef = useRef<HTMLInputElement>(null)
   const [modality, setModality] = useState('photo')
   const [provider, setProvider] = useState('self_hosted')
@@ -46,6 +47,8 @@ export function SubmissionsCard({ questionId }: { questionId: string }) {
     (s) => s.grading_status === 'queued' || s.grading_status === 'grading',
   )
   const ungraded = submissions?.filter((s) => s.grading_status !== 'graded').length ?? 0
+  const graded = submissions?.filter((s) => s.grading_status === 'graded').length ?? 0
+  const released = submissions?.filter((s) => s.released).length ?? 0
 
   const runGradeAll = async (includeGraded: boolean) => {
     try {
@@ -54,6 +57,26 @@ export function SubmissionsCard({ questionId }: { questionId: string }) {
         toast.info(`Nothing to mark — ${res.skipped} already done`)
       } else {
         toast.success(`Marking ${res.queued} submission(s)`)
+      }
+    } catch (err) {
+      toast.error((err as Error).message)
+    }
+  }
+
+  const runReleaseAll = async (released: boolean) => {
+    try {
+      const res = await releaseAll.mutateAsync(released)
+      if (!released) {
+        toast.success(`Withdrew ${res.changed} result(s)`)
+      } else if (res.skipped) {
+        // Named rather than passed over silently: pressing this means
+        // "publish the class", and the teacher has to know when part of
+        // it could not be.
+        toast.warning(
+          `Released ${res.changed}. ${res.skipped} not marked yet, so still hidden.`,
+        )
+      } else {
+        toast.success(`Released ${res.changed} result(s) to students`)
       }
     } catch (err) {
       toast.error((err as Error).message)
@@ -132,9 +155,28 @@ export function SubmissionsCard({ questionId }: { questionId: string }) {
             >
               Re-mark all
             </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => runReleaseAll(true)}
+              disabled={releaseAll.isPending || inFlight || !graded}
+              title="Publishes every marked submission at once. Unmarked work stays hidden."
+            >
+              {releaseAll.isPending ? 'Releasing…' : `Release ${graded} to students`}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => runReleaseAll(false)}
+              disabled={releaseAll.isPending || !released}
+              title="Hides every result again."
+            >
+              Withdraw all
+            </Button>
             <span className="text-xs text-muted-foreground">
               Runs one at a time. Open any submission to change a mark, or to re-mark just that one
-              with a different model.
+              with a different model. Releasing publishes marked work to students all at once, so
+              nobody sees their result minutes before the rest of the class.
             </span>
           </div>
         )}

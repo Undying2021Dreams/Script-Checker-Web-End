@@ -151,7 +151,12 @@ class AnswerBox(Base):
     id = Column(String, primary_key=True)
     question_id = Column(String, ForeignKey("questions.id", ondelete="CASCADE"), nullable=False)
     label = Column(String, nullable=True)
-    points = Column(Integer, nullable=False, default=1)
+    # Null means "not decided yet", which is different from a part worth
+    # nothing. Marks come from the marking scheme the teacher writes into
+    # the model answer; when that scheme states no figure this stays
+    # unset and says so, rather than quietly standing at one mark and
+    # marking a ten-mark scheme out of one.
+    points = Column(Integer, nullable=True)
     order_index = Column(Integer, nullable=False, default=0)
 
     # Which printed page this box landed on (0-indexed) — set at finalize,

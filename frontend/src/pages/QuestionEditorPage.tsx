@@ -223,7 +223,11 @@ export function QuestionEditorPage() {
   if (error) return <p className="text-destructive">{(error as Error).message}</p>
   if (!question) return null
 
-  const totalPoints = question.answer_boxes.reduce((sum, b) => sum + b.points, 0)
+  const totalPoints = question.answer_boxes.reduce((sum, b) => sum + (b.points ?? 0), 0)
+  // Parts whose worth was never decided. The marking scheme in the model
+  // answer states no figure and nobody set one by hand, so grading will
+  // refuse them rather than mark them out of an assumed number.
+  const partsWithoutMarks = question.answer_boxes.filter((b) => b.points == null)
 
   return (
     <div className="space-y-4">
@@ -286,8 +290,25 @@ export function QuestionEditorPage() {
       {!isFinalized && (
         <p className="text-sm text-muted-foreground">
           Finalizing freezes the layout and prints the alignment markers students' scans are
-          matched against. You can still edit freely now; once finalized, changes go into a new
+          matched against. It also reads what each part is worth from the marking scheme in its
+          model answer. You can still edit freely now; once finalized, changes go into a new
           copy instead.
+        </p>
+      )}
+
+      {/* Said plainly rather than filled in with a guess. A box silently
+          standing at one mark while the scheme beside it was worth ten is
+          exactly how a correct answer came back as 0.5. */}
+      {partsWithoutMarks.length > 0 && (
+        <p className="text-sm text-destructive">
+          {partsWithoutMarks.length} part(s) have no marks yet
+          {partsWithoutMarks.some((b) => b.label)
+            ? ` (${partsWithoutMarks.map((b) => b.label).filter(Boolean).join(', ')})`
+            : ''}
+          . Write the marks into the model answer — "5 marks for the method, 5 marks for the
+          answer" — and they will be picked up
+          {isFinalized ? ' when you re-finalize a copy' : ' when you finalize'}. Grading skips a
+          part whose worth is undecided rather than marking it out of a guess.
         </p>
       )}
 

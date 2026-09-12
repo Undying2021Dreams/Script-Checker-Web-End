@@ -401,7 +401,9 @@ export function SubmissionReviewPage() {
           <h1 className="mt-1 text-xl font-semibold">Review submission</h1>
           <p className="text-sm text-muted-foreground">
             {answers.modality} · {answers.answer_boxes.length} answer box(es)
-            {current && ` · ${current.earned} / ${current.max_score} marks`}
+            {current?.grading_status === 'graded'
+              ? ` · ${current.earned} / ${current.max_score} marks`
+              : ' · not marked yet'}
           </p>
         </div>
 

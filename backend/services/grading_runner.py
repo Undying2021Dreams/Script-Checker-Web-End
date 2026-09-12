@@ -64,7 +64,13 @@ def build_grading_items(db: Session, submission: Submission) -> list[AnswerToGra
         paired: list[GroundTruthBox] = [gt_boxes[gt_id] for gt_id in gt_ids]
 
         blocked = None
-        if not paired:
+        if box.points is None:
+            # What the part is worth was never decided — the marking
+            # scheme stated no figure and nobody set one by hand. Marking
+            # it out of some assumed number is how a ten-mark scheme came
+            # to be marked out of one, so it waits for a human instead.
+            blocked = "No marks set for this part — give it a marking scheme, or set them by hand"
+        elif not paired:
             # Nothing to mark against. Recorded for a human rather than
             # guessed at — an invented mark is worse than an obvious gap.
             blocked = "No model answer is paired with this answer box"
@@ -100,7 +106,7 @@ def build_grading_items(db: Session, submission: Submission) -> list[AnswerToGra
             AnswerToGrade(
                 answer_box_id=box.id,
                 label=box.label or "",
-                max_score=box.points,
+                max_score=box.points or 0,
                 question_text=question_text or whole_paper_text,
                 ground_truth_text=ground_truth_text,
                 ground_truth_images=gt_images,
