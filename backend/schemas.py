@@ -327,3 +327,9 @@ class GroundTruthImageOut(BaseModel):
     created_at: str
 
     model_config = {"from_attributes": True}
+
+class AnswerBoxMarks(BaseModel):
+    """What one answer box is worth. Bounded so a slip cannot make a
+    single box outweigh the whole paper."""
+
+    points: int = Field(ge=0, le=1000)

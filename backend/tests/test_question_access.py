@@ -383,3 +383,63 @@ def test_submitting_a_real_page_persists_its_crops(client, course, db):
     stored = db.query(CropImage).filter(CropImage.submission_id == body["submission_id"]).all()
     assert stored, "crops were extracted but not persisted"
     assert {c.answer_box_id for c in stored} == {"e2e-box"}
+
+
+# ── Marks can be corrected after a paper is finalized ───────────────
+
+def test_marks_can_be_changed_on_a_finalized_question(client, db, make_user):
+    """
+    The one thing finalizing does not freeze.
+
+    Boxes default to one mark. A teacher writes a marking scheme worth
+    ten into the model answer, and the mismatch only shows up once
+    students have submitted and the model has marked a ten-mark scheme
+    out of one. Cloning to a fresh draft at that point would orphan the
+    submissions, so the marks themselves have to stay editable.
+    """
+    from models import AnswerBox, Course, Question
+
+    teacher = make_user(role="teacher")
+    course = Course(title="NM", join_code="NM0009", teacher_id=teacher.id)
+    db.add(course)
+    db.commit()
+
+    q = Question(course_id=course.id, created_by=teacher.id, state="finalized", content={})
+    db.add(q)
+    db.flush()
+    db.add(AnswerBox(id="abx", question_id=q.id, label="a", points=1, order_index=0))
+    db.commit()
+
+    # Everything else on a finalized question stays locked.
+    locked = client.as_user(teacher).put(f"/api/questions/{q.id}/blocks", json={"content": {}})
+    assert locked.status_code == 409
+
+    res = client.as_user(teacher).patch(
+        f"/api/questions/{q.id}/answer-boxes/abx", json={"points": 10}
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["points"] == 10
+
+    db.expire_all()
+    assert db.query(AnswerBox).filter(AnswerBox.id == "abx").one().points == 10
+
+
+def test_another_teacher_cannot_change_your_marks(client, db, make_user):
+    from models import AnswerBox, Course, Question
+
+    teacher = make_user(role="teacher")
+    other = make_user(role="teacher")
+    course = Course(title="NM", join_code="NM0010", teacher_id=teacher.id)
+    db.add(course)
+    db.commit()
+
+    q = Question(course_id=course.id, created_by=teacher.id, state="finalized", content={})
+    db.add(q)
+    db.flush()
+    db.add(AnswerBox(id="abx2", question_id=q.id, label="a", points=1, order_index=0))
+    db.commit()
+
+    res = client.as_user(other).patch(
+        f"/api/questions/{q.id}/answer-boxes/abx2", json={"points": 10}
+    )
+    assert res.status_code == 404

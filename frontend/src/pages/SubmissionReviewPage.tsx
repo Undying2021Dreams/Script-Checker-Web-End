@@ -1,16 +1,28 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { AuthedImage } from '@/components/AuthedImage'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import {
   useOverrideGrade,
   useReleaseGrades,
   useRunGrading,
+  useSetAnswerBoxMarks,
   useSubmissionAnswers,
   useSubmissionGrades,
 } from '@/lib/queries'
@@ -41,15 +53,95 @@ function QrBadge({ qr }: { qr: string | null }) {
   return <Badge variant="outline">No QR</Badge>
 }
 
+/**
+ * Change what a box is worth, after the paper has been finalized.
+ *
+ * This lives here rather than in the question editor because here is
+ * where the problem becomes visible: the teacher is looking at "marked
+ * 0.5 / 1" beside a model answer whose scheme is out of ten. Boxes
+ * default to one mark, and nothing says so until something has been
+ * marked against it.
+ */
+function MarksEditor({
+  box,
+  onSetMarks,
+}: {
+  box: GroupedAnswerBox
+  onSetMarks: (answerBoxId: string, points: number) => Promise<void>
+}) {
+  const [open, setOpen] = useState(false)
+  const [points, setPoints] = useState(String(box.points))
+  const [saving, setSaving] = useState(false)
+
+  const apply = async () => {
+    setSaving(true)
+    try {
+      await onSetMarks(box.answer_box_id, Number(points))
+      setOpen(false)
+      toast.success(`This part is now out of ${points}. Re-run the evaluation to mark against it.`)
+    } catch (err) {
+      toast.error((err as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger
+        render={
+          <Button variant="ghost" size="sm" className="ml-1 h-6 px-2 text-xs font-normal">
+            Change marks
+          </Button>
+        }
+      />
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>What is this part worth?</DialogTitle>
+          <DialogDescription>
+            Set this to the total of the marking scheme in your model answer. A scheme worth
+            ten marked out of one is why a good answer can come back as 0.5.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-2">
+          <Label htmlFor={`marks-${box.answer_box_id}`}>Marks</Label>
+          <Input
+            id={`marks-${box.answer_box_id}`}
+            value={points}
+            onChange={(e) => setPoints(e.target.value)}
+            inputMode="numeric"
+          />
+          <p className="text-xs text-muted-foreground">
+            This changes the paper for every student who answered it, not just this one. Marks
+            already awarded keep the total they were given out of — a score out of one cannot
+            honestly be rescaled — so re-run the evaluation afterwards.
+          </p>
+        </div>
+
+        <DialogFooter>
+          <DialogClose render={<Button variant="ghost">Cancel</Button>} />
+          <Button onClick={apply} disabled={saving || !points.trim() || Number.isNaN(Number(points))}>
+            {saving ? 'Saving…' : 'Set marks'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+
 function GradeRow({
   box,
   grade,
   onOverride,
+  onSetMarks,
   disabled,
 }: {
   box: GroupedAnswerBox
   grade?: AnswerGrade
   onOverride: (score: number | null, feedback: string) => Promise<void>
+  onSetMarks: (answerBoxId: string, points: number) => Promise<void>
   disabled: boolean
 }) {
   // Seeded from whatever already stands for this box: the teacher's own
@@ -69,18 +161,37 @@ function GradeRow({
   const [feedback, setFeedback] = useState<string>(savedFeedback)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+
+  // A run of the model is allowed to take the fields over, including
+  // from half-typed text: the teacher asked for a fresh opinion and
+  // expects to see it. Ordinary edits are still protected from the
+  // two-second poll, which is what `dirty` is for — so the two cases are
+  // told apart by whether the model's own answer actually changed.
+  //
+  // A mark the teacher has already saved still wins over both: it is
+  // what `savedScore` resolves to, so re-running the model never undoes
+  // a decision that has been committed.
+  const modelStamp = `${grade?.llm_score ?? ''}|${grade?.llm_feedback ?? ''}`
+  const lastModelStamp = useRef(modelStamp)
 
   useEffect(() => {
-    if (dirty) return
+    const freshlyEvaluated = lastModelStamp.current !== modelStamp
+    lastModelStamp.current = modelStamp
+
+    if (!freshlyEvaluated && dirty) return
+    if (freshlyEvaluated) setDirty(false)
+
     setScore(savedScore?.toString() ?? '')
     setFeedback(savedFeedback)
-  }, [savedScore, savedFeedback, dirty])
+  }, [modelStamp, savedScore, savedFeedback, dirty])
 
   const save = async () => {
     setSaving(true)
     try {
       await onOverride(score.trim() === '' ? null : Number(score), feedback)
       setDirty(false)
+      setConfirming(false)
       toast.success(`Saved mark for ${box.label || 'this part'}`)
     } catch (err) {
       toast.error((err as Error).message)
@@ -97,6 +208,7 @@ function GradeRow({
           <span className="ml-2 text-sm font-normal text-muted-foreground">
             out of {box.points}
           </span>
+          <MarksEditor box={box} onSetMarks={onSetMarks} />
         </CardTitle>
         <div className="flex items-center gap-2">
           {!box.complete && <Badge variant="destructive">Missing a page</Badge>}
@@ -177,9 +289,57 @@ function GradeRow({
               }}
             />
           </div>
-          <Button variant="outline" onClick={save} disabled={disabled || saving}>
-            {saving ? 'Saving…' : 'Save mark'}
-          </Button>
+          <Dialog open={confirming} onOpenChange={setConfirming}>
+            <DialogTrigger
+              render={
+                <Button variant="outline" disabled={disabled || saving}>
+                  {saving ? 'Saving…' : 'Save mark'}
+                </Button>
+              }
+            />
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Save your mark?</DialogTitle>
+                <DialogDescription>
+                  This becomes the mark of record for{' '}
+                  {box.label || `part ${box.order_index + 1}`}, and the model's
+                  will not replace it if you evaluate again.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-2 rounded-md border p-3 text-sm">
+                <p>
+                  <span className="text-muted-foreground">Mark: </span>
+                  {score.trim() === '' ? (
+                    <span className="text-muted-foreground">
+                      blank — the model's {grade?.llm_score ?? '—'} / {box.points} will stand
+                    </span>
+                  ) : (
+                    <span className="font-medium">
+                      {score} / {box.points}
+                    </span>
+                  )}
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Feedback: </span>
+                  {feedback.trim() === '' ? (
+                    <span className="text-muted-foreground">
+                      blank — the model's comment will stand
+                    </span>
+                  ) : (
+                    <MathText text={feedback} />
+                  )}
+                </p>
+              </div>
+
+              <DialogFooter>
+                <DialogClose render={<Button variant="ghost">Cancel</Button>} />
+                <Button onClick={save} disabled={saving}>
+                  {saving ? 'Saving…' : 'Save mark'}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
         <p className="text-xs text-muted-foreground">
           Leave the mark blank to fall back to the model's. Your mark always wins, and both are
@@ -202,6 +362,7 @@ export function SubmissionReviewPage() {
   const runGrading = useRunGrading(submissionId)
   const override = useOverrideGrade(submissionId)
   const release = useReleaseGrades(submissionId)
+  const setMarks = useSetAnswerBoxMarks(answers?.question_id ?? '', submissionId)
 
   const gradeByBox = new Map((current?.grades ?? []).map((g) => [g.answer_box_id, g]))
 
@@ -292,6 +453,9 @@ export function SubmissionReviewPage() {
                 score,
                 feedback: feedback || undefined,
               })
+            }}
+            onSetMarks={async (answerBoxId, points) => {
+              await setMarks.mutateAsync({ answerBoxId, points })
             }}
           />
         ))}

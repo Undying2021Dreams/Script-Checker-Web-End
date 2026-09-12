@@ -197,6 +197,23 @@ export function useOverrideGrade(submissionId: string) {
   })
 }
 
+export function useSetAnswerBoxMarks(questionId: string, submissionId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ answerBoxId, points }: { answerBoxId: string; points: number }) =>
+      apiFetch<{ id: string; points: number }>(
+        `/questions/${questionId}/answer-boxes/${answerBoxId}`,
+        { method: 'PATCH', body: JSON.stringify({ points }) },
+      ),
+    // The marks belong to the question, so the answer list carries them,
+    // while the totals a mark is shown against come from the grades.
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['answers', submissionId] })
+      qc.invalidateQueries({ queryKey: ['grades', submissionId] })
+    },
+  })
+}
+
 export function useReleaseGrades(submissionId: string) {
   const qc = useQueryClient()
   return useMutation({

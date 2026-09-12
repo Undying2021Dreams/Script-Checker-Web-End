@@ -41,6 +41,7 @@ from models import (
 from ratelimit import HEAVY_CPU_LIMIT, LLM_LIMIT, limiter
 from security import get_current_user, require_teacher
 from schemas import (
+    AnswerBoxMarks,
     QuestionCreate,
     QuestionContentUpdate,
     QuestionMetaUpdate,
@@ -186,6 +187,50 @@ def _assert_draft(q: Question):
             status_code=409,
             detail=f"Question {q.id} is finalized — cannot modify. Clone it to create a new draft.",
         )
+
+
+@router.patch("/{question_id}/answer-boxes/{box_id}")
+def set_answer_box_marks(
+    question_id: str,
+    box_id: str,
+    body: AnswerBoxMarks,
+    user: User = Depends(require_teacher),
+    db: Session = Depends(get_db),
+):
+    """
+    Change what one answer box is worth, finalized or not.
+
+    A deliberate exception to the finalize lock. What a box is worth is a
+    marking decision, not part of the printed artefact: the marks are
+    nowhere on the paper, so changing them contradicts nothing a student
+    was given, and the fiducial geometry that makes extraction work is
+    untouched.
+
+    Without this the mismatch is unfixable in practice. Boxes default to
+    one mark, a teacher writes a marking scheme worth ten into the model
+    answer, and the model is then told to mark a ten-mark scheme out of
+    one. That only becomes visible after students have submitted — by
+    which point cloning the question to a fresh draft would orphan their
+    work.
+
+    Marks already recorded keep the maximum they were awarded against,
+    since a score out of one cannot be honestly rescaled to a score out
+    of ten. Re-running the evaluation is what brings them into line.
+    """
+    q = _get_question_or_404(question_id, db, user)
+
+    box = (
+        db.query(AnswerBox)
+        .filter(AnswerBox.id == box_id, AnswerBox.question_id == q.id)
+        .one_or_none()
+    )
+    if box is None:
+        raise HTTPException(status_code=404, detail="Answer box not found on this question")
+
+    box.points = body.points
+    db.commit()
+    db.refresh(box)
+    return {"id": box.id, "points": box.points, "label": box.label or ""}
 
 
 def _upsert_answer_boxes(q: Question, boxes_in: list, db: Session):
