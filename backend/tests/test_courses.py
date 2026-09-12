@@ -16,10 +16,33 @@ def test_teacher_creates_course_and_gets_a_join_code(client, make_user):
     assert not set(course["join_code"]) & set("01OIL")
 
 
-def test_student_cannot_create_a_course(client, make_user):
+def test_anyone_may_start_a_course_of_their_own(client, make_user):
+    """
+    Creating a course makes you the teacher of that course and nothing
+    else — every other permission is checked against the course itself.
+    """
     student = make_user(role="student")
-    res = client.as_user(student).post("/api/courses", json={"title": "Sneaky"})
-    assert res.status_code == 403
+    res = client.as_user(student).post("/api/courses", json={"title": "Reading group"})
+    assert res.status_code == 201, res.text
+    assert res.json()["my_role"] == "teacher"
+
+
+def test_course_creation_can_be_closed_to_configured_teachers(client, make_user, monkeypatch):
+    """
+    The deployment accepts any Microsoft account, so on a public URL the
+    owner may want the door shut. Keys here are free-tier, which makes
+    the exposure a burnt quota rather than a bill — but a stranger
+    exhausting it before a demo is reason enough to keep the switch.
+    """
+    from config import settings
+
+    monkeypatch.setattr(settings, "OPEN_COURSE_CREATION", False)
+
+    student = make_user(role="student")
+    assert client.as_user(student).post("/api/courses", json={"title": "Sneaky"}).status_code == 403
+
+    teacher = make_user(role="teacher")
+    assert client.as_user(teacher).post("/api/courses", json={"title": "Fine"}).status_code == 201
 
 
 def test_join_codes_are_unique_across_courses(client, make_user):

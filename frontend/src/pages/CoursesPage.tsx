@@ -156,7 +156,7 @@ export function CoursesPage() {
   // The one permission that really is global: whether you may start a
   // course of your own. Everything else about being a teacher or a
   // student is decided per course.
-  const canCreateCourses = me?.role === 'teacher' || me?.role === 'admin'
+  const canCreateCourses = me?.can_create_courses ?? false
 
   const teaching = courses?.filter((c) => c.my_role === 'teacher') ?? []
   const taking = courses?.filter((c) => c.my_role === 'student') ?? []

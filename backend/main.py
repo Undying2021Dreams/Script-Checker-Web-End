@@ -39,7 +39,17 @@ api = APIRouter(prefix="/api")
 
 @api.get("/me", response_model=UserOut)
 def me(user: User = Depends(get_current_user)):
-    return user
+    return UserOut(
+        id=user.id,
+        email=user.email,
+        display_name=user.display_name,
+        role=user.role,
+        # Depends on a deployment setting as well as the account, so the
+        # client is told rather than left to infer it from the role.
+        can_create_courses=(
+            settings.OPEN_COURSE_CREATION or user.role in ("teacher", "admin")
+        ),
+    )
 
 
 api.include_router(courses.router)

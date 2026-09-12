@@ -66,6 +66,19 @@ def get_current_user(
     return user
 
 
+def may_create_courses(user: User = Depends(get_current_user)) -> User:
+    """
+    Who may start a course of their own — the only permission left that
+    is global rather than a fact about a particular course.
+    """
+    if settings.OPEN_COURSE_CREATION or user.role in ("teacher", "admin"):
+        return user
+    raise HTTPException(
+        status.HTTP_403_FORBIDDEN,
+        "Your account can't create courses. Ask whoever runs this deployment to add you.",
+    )
+
+
 def require_teacher(user: User = Depends(get_current_user)) -> User:
     if user.role not in ("teacher", "admin"):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Teacher role required")
