@@ -159,8 +159,11 @@ export const QuestionEditor = forwardRef<QuestionEditorHandle, Props>(function Q
   return (
     <div className="overflow-hidden rounded-lg border">
       <EditorToolbar editor={editor} isFinalized={!!isFinalized} onInsertImage={handleInsertImage} />
-      <div className="max-h-[70vh] overflow-y-auto bg-muted/40 p-6">
-        <div className="doc-page mx-auto bg-white text-black shadow-sm">
+      {/* Same mat as everywhere else paper appears, so the sheet being
+          authored reads as the same kind of object as the scan it will
+          be marked against. */}
+      <div className="max-h-[70vh] overflow-y-auto bg-muted/60 p-6">
+        <div className="doc-page mx-auto rounded-lg border border-border/80 bg-white text-black shadow-sm">
           <EditorContent editor={editor} />
         </div>
       </div>

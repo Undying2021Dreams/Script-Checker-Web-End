@@ -1,6 +1,6 @@
 import { Link, useParams } from 'react-router-dom'
 
-import { AuthedImage } from '@/components/AuthedImage'
+import { PaperImage } from '@/components/Paper'
 import { MathText } from '@/components/MathText'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -101,16 +101,14 @@ export function StudentResultPage() {
 
             {(g.model_answer_images.length > 0 || g.model_answer_text) && (
               <div className="space-y-2">
-                <p className="text-xs font-medium text-muted-foreground">
-                  The solution, with how the marks were allocated
-                </p>
                 {g.model_answer_images.length > 0 ? (
                   g.model_answer_images.map((url) => (
-                    <AuthedImage
+                    <PaperImage
                       key={url}
+                      kind="model"
                       path={url.replace(/^\/api/, '')}
                       alt="Worked solution"
-                      className="max-w-full rounded-lg border bg-white"
+                      caption="Your teacher's solution"
                     />
                   ))
                 ) : (
