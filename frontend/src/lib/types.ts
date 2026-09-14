@@ -163,6 +163,9 @@ export interface StudentAssignment {
   page_count: number | null
   finalized_at: string | null
   submission_id: string | null
+  // How many pages actually arrived, so a student can see that all of
+  // their script got through.
+  submitted_pages: number
   submission_status: SubmissionGrades['grading_status'] | null
   released: boolean
   earned: number | null
