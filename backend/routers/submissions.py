@@ -6,9 +6,10 @@ from __future__ import annotations
 
 import io
 import uuid
+from datetime import datetime, timezone
 from collections import defaultdict
 
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form, status
 from sqlalchemy.orm import Session
 
 from config import settings
@@ -29,6 +30,40 @@ from security import get_current_user
 from services.grading_runner import submission_totals
 
 router = APIRouter(prefix="/submissions", tags=["submissions"])
+
+
+def _assert_can_modify(sub: Submission, db: Session, user: User) -> None:
+    """
+    Whether this person may still change what is in a script.
+
+    A student may, until they hand it in — after which the work is
+    fixed, because a mark has to belong to the thing that was marked.
+    A teacher may afterwards too: scanning a corrected page on a
+    student's behalf is a normal correction, and it is their mark to
+    revise.
+    """
+    course = (
+        db.query(Course)
+        .join(Question, Question.course_id == Course.id)
+        .filter(Question.id == sub.question_id)
+        .first()
+    )
+    if user.role == "admin" or (course is not None and course.teacher_id == user.id):
+        return
+
+    if sub.student_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Submission not found")
+
+    if sub.grading_status == "graded":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This has already been marked, so it can't be changed.",
+        )
+    if sub.submitted_at is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "You've already handed this in. Ask your teacher if you need to change it.",
+        )
 
 
 def _assert_not_already_marked(question_id: str, db: Session, user: User) -> None:
@@ -67,6 +102,21 @@ def _assert_not_already_marked(question_id: str, db: Session, user: User) -> Non
             status_code=409,
             detail="Your answer for this question has already been marked, so it can't be replaced. "
             "Ask your teacher if you need to submit again.",
+        )
+
+    handed_in = (
+        db.query(Submission)
+        .filter(
+            Submission.question_id == question_id,
+            Submission.student_id == user.id,
+            Submission.submitted_at.isnot(None),
+        )
+        .first()
+    )
+    if handed_in is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="You've already handed this in. Ask your teacher if you need to change it.",
         )
 
 
@@ -470,6 +520,87 @@ def list_submissions(
 def get_submission(submission_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     sub = _get_submission_or_404(submission_id, db, user)
     return sub.manifest
+
+
+@router.delete("/{submission_id}/pages/{page_index}")
+def delete_submission_page(
+    submission_id: str,
+    page_index: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Remove one page from a script that has not been handed in.
+
+    A page photographed badly, or of the wrong sheet, otherwise stays in
+    the submission for ever: uploading again only appends, and there was
+    no way to take anything back.
+
+    The remaining pages keep their numbers rather than closing the gap.
+    Renumbering would move pages the crops already reference, and the
+    order of what is left is unchanged either way.
+    """
+    sub = _get_submission_or_404(submission_id, db, user)
+    _assert_can_modify(sub, db, user)
+
+    manifest = dict(sub.manifest or {})
+    existing = manifest.get("pages", [])
+    removed = next((p for p in existing if p.get("page_index") == page_index), None)
+    if removed is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No page {page_index} on this submission")
+
+    manifest["pages"] = [p for p in existing if p.get("page_index") != page_index]
+    sub.manifest = manifest
+
+    db.query(SubmissionImage).filter(
+        SubmissionImage.submission_id == sub.id,
+        SubmissionImage.page_index == page_index,
+    ).delete(synchronize_session=False)
+
+    # The crops cut from that page go with it, or the answer boxes it
+    # contributed would still be marked against an image nobody can see.
+    #
+    # A crop does not record which page it came from — it is keyed by
+    # answer box and part — so the page's own manifest entry is what
+    # says which ones belong to it.
+    for crop in (removed or {}).get("crops", []):
+        db.query(CropImage).filter(
+            CropImage.submission_id == sub.id,
+            CropImage.answer_box_id == crop["answer_box_id"],
+            CropImage.part == crop.get("part", 0),
+        ).delete(synchronize_session=False)
+
+    db.commit()
+    db.refresh(sub)
+    return sub.manifest
+
+
+@router.post("/{submission_id}/submit")
+def hand_in_submission(
+    submission_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Say the script is complete.
+
+    Until this, pages can be added and removed freely; after it the work
+    is fixed. The point is that a teacher can tell a finished script
+    from one still being photographed — marking page one of three and
+    never knowing is the failure this prevents.
+    """
+    sub = _get_submission_or_404(submission_id, db, user)
+    _assert_can_modify(sub, db, user)
+
+    if not (sub.manifest or {}).get("pages"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Add at least one page before handing this in",
+        )
+
+    sub.submitted_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"submission_id": sub.id, "submitted_at": sub.submitted_at}
 
 
 @router.get("/{submission_id}/answers", response_model=GroupedSubmissionOut)

@@ -166,6 +166,9 @@ export interface StudentAssignment {
   // How many pages actually arrived, so a student can see that all of
   // their script got through.
   submitted_pages: number
+  // False while they are still assembling it; true once handed in, at
+  // which point the pages are fixed.
+  handed_in: boolean
   submission_status: SubmissionGrades['grading_status'] | null
   released: boolean
   earned: number | null

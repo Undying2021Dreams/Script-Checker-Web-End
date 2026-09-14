@@ -369,3 +369,50 @@ export function usePopularCourses() {
     queryFn: () => apiFetch<CourseSummary[]>('/courses/popular'),
   })
 }
+
+// ── Assembling a script ─────────────────────────────────────────────
+
+export interface SubmissionPage {
+  page_index: number
+  markers_detected?: string
+  crops?: unknown[]
+  error?: string | null
+}
+
+export function useSubmissionPages(submissionId: string | null) {
+  return useQuery({
+    enabled: !!submissionId,
+    queryKey: ['submission-pages', submissionId],
+    queryFn: () =>
+      apiFetch<{ pages: SubmissionPage[] }>(`/submissions/${submissionId}`),
+  })
+}
+
+export function useDeleteSubmissionPage(submissionId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (pageIndex: number) =>
+      apiFetch<{ pages: SubmissionPage[] }>(
+        `/submissions/${submissionId}/pages/${pageIndex}`,
+        { method: 'DELETE' },
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['submission-pages', submissionId] })
+      qc.invalidateQueries({ queryKey: ['assignments'] })
+    },
+  })
+}
+
+export function useHandInSubmission(submissionId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      apiFetch<{ submitted_at: string }>(`/submissions/${submissionId}/submit`, {
+        method: 'POST',
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['submission-pages', submissionId] })
+      qc.invalidateQueries({ queryKey: ['assignments'] })
+    },
+  })
+}

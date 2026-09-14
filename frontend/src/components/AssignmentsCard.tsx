@@ -1,12 +1,11 @@
-import { useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 
-import { Pending, StatusPill } from '@/components/ui/feedback'
+import { StatusPill } from '@/components/ui/feedback'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { apiFetchBlobUrl } from '@/lib/api'
-import { useAssignments, useUploadSubmission } from '@/lib/queries'
+import { useAssignments } from '@/lib/queries'
 import type { StudentAssignment } from '@/lib/types'
 
 function MarkOrStatus({ a }: { a: StudentAssignment }) {
@@ -28,17 +27,7 @@ function MarkOrStatus({ a }: { a: StudentAssignment }) {
   return <StatusPill tone="info">Submitted</StatusPill>
 }
 
-function AssignmentRow({ assignment }: { assignment: StudentAssignment }) {
-  const fileRef = useRef<HTMLInputElement>(null)
-  const cameraRef = useRef<HTMLInputElement>(null)
-  const [modality, setModality] = useState('photo')
-  const upload = useUploadSubmission(assignment.question_id)
-
-  // The server refuses a replacement once the work is marked; the UI
-  // stops offering one rather than letting the student pick a file and
-  // meet a 409.
-  const locked = assignment.submission_status === 'graded' || assignment.released
-
+function AssignmentRow({ assignment, courseId }: { assignment: StudentAssignment; courseId: string }) {
   const openPaper = async () => {
     try {
       const url = await apiFetchBlobUrl(`/student/assignments/${assignment.question_id}/pdf`)
@@ -49,44 +38,15 @@ function AssignmentRow({ assignment }: { assignment: StudentAssignment }) {
     }
   }
 
-  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? [])
-    if (files.length === 0) return
-
-    // One at a time, and in order. Each page is extracted on the server
-    // — markers found, answer boxes cropped — so firing them all at once
-    // would mean several of those running together for one student, and
-    // the pages could be stored out of order.
-    //
-    // The first upload attaches to any existing submission; every page
-    // after it attaches to whatever that returned, so a batch stays one
-    // submission instead of becoming several attempts.
-    let submissionId = assignment.submission_id ?? undefined
-    let done = 0
-
-    try {
-      for (const file of files) {
-        const result = await upload.mutateAsync({ file, modality, submissionId })
-        submissionId = result.submission_id
-        done += 1
-      }
-      toast.success(files.length === 1 ? 'Answer uploaded' : `${files.length} pages uploaded`)
-    } catch (err) {
-      // Says how far it got: with several pages, "failed" alone leaves
-      // the student unsure whether to send the whole lot again.
-      toast.error(
-        done > 0
-          ? `Uploaded ${done} of ${files.length}, then: ${(err as Error).message}`
-          : (err as Error).message,
-      )
-    } finally {
-      if (fileRef.current) fileRef.current.value = ''
-      if (cameraRef.current) cameraRef.current.value = ''
-    }
-  }
+  // Uploading used to happen from this row, which left no way to see
+  // what had been sent or to take a bad page back. Assembling a script
+  // is its own task and has its own page now.
+  const submitLink =
+    `/assignments/${assignment.question_id}/submit?course=${courseId}` +
+    (assignment.submission_id ? `&submission=${assignment.submission_id}` : '')
 
   return (
-    <div className="space-y-3 rounded-md border px-3 py-3">
+    <div className="space-y-3 rounded-lg border bg-card px-3 py-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-sm">
           <span className={assignment.title ? 'font-medium' : 'text-muted-foreground'}>
@@ -105,86 +65,33 @@ function AssignmentRow({ assignment }: { assignment: StudentAssignment }) {
           Open paper
         </Button>
 
-        {!locked && (
-          <>
-            <select
-              value={modality}
-              onChange={(e) => setModality(e.target.value)}
-              className="rounded-md border bg-background px-2 py-1 text-xs"
-              title="How you captured the page"
-            >
-              <option value="photo">Photo</option>
-              <option value="scanner">Scanner</option>
-            </select>
-
-            {/* Two ways in, because on a phone they are genuinely
-                different actions. `capture` opens the camera and hands
-                back exactly one photo — good for "photograph this page"
-                and useless for "send the four I already took", which
-                some browsers then refuse to offer at all. So the camera
-                is one button and the picker is another, and the picker
-                takes as many as you like. */}
-            <Button size="sm" onClick={() => cameraRef.current?.click()} disabled={upload.isPending}>
-              {upload.isPending ? <Pending>Uploading…</Pending> : 'Take a photo'}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => fileRef.current?.click()}
-              disabled={upload.isPending}
-            >
-              Choose files
-            </Button>
-            {/* `capture` asks a phone for the rear camera directly
-                rather than the file picker, which is the difference
-                between "find the photo you took" and "photograph the
-                page". Desktop browsers ignore it, and a phone still
-                offers the library if the student would rather pick an
-                existing shot — so nothing is lost either way.
-
-                PDFs stay accepted for tablet answers and scanners. */}
-            <input
-              ref={cameraRef}
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              capture="environment"
-              onChange={handleFile}
-              className="hidden"
-            />
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/jpeg,image/png,image/webp,application/pdf"
-              multiple
-              onChange={handleFile}
-              className="hidden"
-            />
-          </>
+        {!assignment.handed_in && (
+          <Button
+            size="sm"
+            nativeButton={false}
+            render={
+              <Link to={submitLink}>
+                {assignment.submitted_pages > 0 ? 'Continue my answer' : 'Answer this'}
+              </Link>
+            }
+          />
         )}
 
         {assignment.released && assignment.submission_id && (
           <Button
             size="sm"
+            variant="outline"
             nativeButton={false}
             render={<Link to={`/results/${assignment.submission_id}`}>See my result</Link>}
           />
         )}
       </div>
 
-      {/* Once the work has been marked it cannot be swapped for another
-          attempt — the mark on record has to belong to the work on
-          record, and a released result comes with the solution. Saying
-          so beats a button that fails when pressed. */}
-      {locked && (
-        <p className="text-xs text-muted-foreground">
-          This has been marked, so it can no longer be replaced.
-        </p>
-      )}
-
       {assignment.submitted_pages > 0 && (
         <p className="text-xs text-muted-foreground">
-          {assignment.submitted_pages} page{assignment.submitted_pages === 1 ? '' : 's'} received
-          {!assignment.released && !locked && ". Your teacher hasn't released marks yet."}
+          {assignment.submitted_pages} page{assignment.submitted_pages === 1 ? '' : 's'}
+          {assignment.handed_in ? ' handed in' : ' added — not handed in yet'}
+          {assignment.handed_in && !assignment.released && ". Your teacher hasn't released marks yet."}
         </p>
       )}
     </div>
@@ -212,7 +119,7 @@ export function AssignmentsCard({ courseId, enabled }: { courseId: string; enabl
           </p>
         )}
         {data?.map((a) => (
-          <AssignmentRow key={a.question_id} assignment={a} />
+          <AssignmentRow key={a.question_id} assignment={a} courseId={courseId} />
         ))}
       </CardContent>
     </Card>

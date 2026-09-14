@@ -119,6 +119,8 @@ class StudentAssignment(BaseModel):
     finalized_at: datetime | None
     submission_id: str | None
     submitted_pages: int = 0
+    # False while the student is still assembling their script.
+    handed_in: bool = False
     submission_status: str | None
     released: bool
     # Withheld until the teacher releases the marks.
