@@ -118,6 +118,7 @@ class StudentAssignment(BaseModel):
     page_count: int | None
     finalized_at: datetime | None
     submission_id: str | None
+    submitted_pages: int = 0
     submission_status: str | None
     released: bool
     # Withheld until the teacher releases the marks.

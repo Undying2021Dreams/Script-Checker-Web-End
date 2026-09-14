@@ -75,6 +75,12 @@ def _to_assignment(q: Question, db: Session, user: User) -> StudentAssignment:
         page_count=q.page_count,
         finalized_at=q.finalized_at,
         submission_id=sub.id if sub else None,
+        # How many pages actually arrived. Without it a student who
+        # photographs a three-page script has no way to tell whether all
+        # three landed — and until today the second one silently replaced
+        # the first, which is exactly the kind of thing this makes
+        # visible.
+        submitted_pages=len((sub.manifest or {}).get("pages", [])) if sub else 0,
         # A student is told their work is being marked, but not the marks
         # themselves until the teacher releases them.
         submission_status=sub.grading_status if sub else None,

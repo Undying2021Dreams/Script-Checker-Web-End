@@ -30,6 +30,7 @@ function MarkOrStatus({ a }: { a: StudentAssignment }) {
 
 function AssignmentRow({ assignment }: { assignment: StudentAssignment }) {
   const fileRef = useRef<HTMLInputElement>(null)
+  const cameraRef = useRef<HTMLInputElement>(null)
   const [modality, setModality] = useState('photo')
   const upload = useUploadSubmission(assignment.question_id)
 
@@ -80,6 +81,7 @@ function AssignmentRow({ assignment }: { assignment: StudentAssignment }) {
       )
     } finally {
       if (fileRef.current) fileRef.current.value = ''
+      if (cameraRef.current) cameraRef.current.value = ''
     }
   }
 
@@ -115,14 +117,23 @@ function AssignmentRow({ assignment }: { assignment: StudentAssignment }) {
               <option value="scanner">Scanner</option>
             </select>
 
-            <Button size="sm" onClick={() => fileRef.current?.click()} disabled={upload.isPending}>
-              {upload.isPending ? (
-                <Pending>Uploading…</Pending>
-              ) : assignment.submission_id ? (
-                'Add more pages'
-              ) : (
-                'Upload my answer'
-              )}
+            {/* Two ways in, because on a phone they are genuinely
+                different actions. `capture` opens the camera and hands
+                back exactly one photo — good for "photograph this page"
+                and useless for "send the four I already took", which
+                some browsers then refuse to offer at all. So the camera
+                is one button and the picker is another, and the picker
+                takes as many as you like. */}
+            <Button size="sm" onClick={() => cameraRef.current?.click()} disabled={upload.isPending}>
+              {upload.isPending ? <Pending>Uploading…</Pending> : 'Take a photo'}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => fileRef.current?.click()}
+              disabled={upload.isPending}
+            >
+              Choose files
             </Button>
             {/* `capture` asks a phone for the rear camera directly
                 rather than the file picker, which is the difference
@@ -133,10 +144,17 @@ function AssignmentRow({ assignment }: { assignment: StudentAssignment }) {
 
                 PDFs stay accepted for tablet answers and scanners. */}
             <input
+              ref={cameraRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              capture="environment"
+              onChange={handleFile}
+              className="hidden"
+            />
+            <input
               ref={fileRef}
               type="file"
               accept="image/jpeg,image/png,image/webp,application/pdf"
-              capture="environment"
               multiple
               onChange={handleFile}
               className="hidden"
@@ -163,9 +181,10 @@ function AssignmentRow({ assignment }: { assignment: StudentAssignment }) {
         </p>
       )}
 
-      {assignment.submission_id && !assignment.released && !locked && (
+      {assignment.submitted_pages > 0 && (
         <p className="text-xs text-muted-foreground">
-          Your teacher hasn't released marks for this yet.
+          {assignment.submitted_pages} page{assignment.submitted_pages === 1 ? '' : 's'} received
+          {!assignment.released && !locked && ". Your teacher hasn't released marks yet."}
         </p>
       )}
     </div>
