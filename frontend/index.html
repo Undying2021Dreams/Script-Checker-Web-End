@@ -3,8 +3,24 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/favicon.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover so a standalone launch can paint under the
+         notch and home indicator; the safe-area insets in index.css keep
+         content out from under them. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>AutoCheck — automated script checking</title>
+
+    <!-- Installable on a phone: home-screen icon, own window, no browser
+         chrome. A student photographing a script is the whole point of
+         this on mobile, and a page behind an address bar does not read
+         as something you open to do that. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="AutoCheck" />
+    <!-- iOS reads this once at launch and cannot follow a theme change,
+         so it is the light ground rather than either theme's colour. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="theme-color" content="#2b7de9" />
 
     <!-- The link-preview card. Sent to a supervisor or pasted into a
          chat, the URL otherwise renders as a bare address with no
@@ -30,5 +46,19 @@
     </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // Registered only in a real deployment. Under Vite's dev server a
+      // service worker intercepting module requests makes hot reload
+      // behave unpredictably, and the install prompt is not what anyone
+      // is testing at localhost.
+      if ('serviceWorker' in navigator && location.protocol === 'https:') {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker.register('/sw.js').catch(function () {
+            // Not being installable is a missing nicety, not a fault:
+            // the site works exactly the same without it.
+          })
+        })
+      }
+    </script>
   </body>
 </html>

@@ -20,7 +20,10 @@ export function AppLayout() {
     <div className="min-h-svh bg-background">
       {/* Sticky, so the way back out of a long review or editor screen is
           always on screen rather than a scroll away. */}
-      <header className="sticky top-0 z-30 border-b bg-card/85 backdrop-blur">
+      <header
+        className="sticky top-0 z-30 border-b bg-card/85 backdrop-blur"
+        style={{ paddingTop: 'env(safe-area-inset-top)' }}
+      >
         <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-4 px-6 py-3">
           <Link to="/" aria-label="AutoCheck home">
             <Logo />
@@ -52,7 +55,7 @@ export function AppLayout() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-5xl px-6 py-8">
+      <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
         <Outlet />
       </main>
     </div>
