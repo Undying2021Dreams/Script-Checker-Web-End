@@ -81,6 +81,7 @@ def _to_assignment(q: Question, db: Session, user: User) -> StudentAssignment:
         # the first, which is exactly the kind of thing this makes
         # visible.
         submitted_pages=len((sub.manifest or {}).get("pages", [])) if sub else 0,
+        handed_in=bool(sub and sub.submitted_at),
         # A student is told their work is being marked, but not the marks
         # themselves until the teacher releases them.
         submission_status=sub.grading_status if sub else None,

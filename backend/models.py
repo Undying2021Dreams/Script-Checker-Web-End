@@ -200,6 +200,15 @@ class Submission(Base):
     grading_error = Column(String, nullable=True)
     graded_at = Column(DateTime, nullable=True)
 
+    # Null while the student is still assembling their script.
+    #
+    # Photographing a multi-page answer takes several goes, and until
+    # they say they are finished there is no way to tell a half-uploaded
+    # script from a complete one — so a teacher could mark page one of
+    # three and never know. Until this is set the student may add and
+    # remove pages; afterwards the work is fixed.
+    submitted_at = Column(DateTime, nullable=True)
+
     # Auto-generated marks stay invisible to the student until a teacher
     # has reviewed them and released the submission deliberately.
     released_at = Column(DateTime, nullable=True)

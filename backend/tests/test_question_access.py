@@ -600,3 +600,86 @@ def test_uploading_a_second_page_adds_it_rather_than_replacing_the_first(
     # one page is fixed without disturbing the others.
     retake = upload(submission_id=sub_id, page_index=1)
     assert [p["page_index"] for p in retake.json()["pages"]] == [0, 1, 2]
+
+
+# ── Assembling a script, then handing it in ─────────────────────────
+
+def _upload_page(client, student, question, submission_id=None):
+    import io
+
+    data = {"question_id": question.id, "modality": "photo"}
+    if submission_id:
+        data["submission_id"] = submission_id
+    return client.as_user(student).post(
+        "/api/submissions",
+        data=data,
+        files={"image": ("p.png", io.BytesIO(b"not a real image"), "image/png")},
+    )
+
+
+def test_a_student_can_remove_a_page_before_handing_in(client, course, question, make_user, db):
+    """
+    A page of the wrong sheet, or too blurry to read, otherwise stays in
+    the script for ever: uploading only ever appends.
+    """
+    student = make_user(role="student")
+    _enrol(db, course, student)
+
+    sub_id = _upload_page(client, student, question).json()["submission_id"]
+    _upload_page(client, student, question, sub_id)
+    _upload_page(client, student, question, sub_id)
+
+    res = client.as_user(student).delete(f"/api/submissions/{sub_id}/pages/1")
+    assert res.status_code == 200, res.text
+
+    # The survivors keep their own numbers rather than closing the gap.
+    assert [p["page_index"] for p in res.json()["pages"]] == [0, 2]
+
+
+def test_handing_in_fixes_the_script(client, course, question, make_user, db):
+    student = make_user(role="student")
+    _enrol(db, course, student)
+
+    sub_id = _upload_page(client, student, question).json()["submission_id"]
+    assert client.as_user(student).post(f"/api/submissions/{sub_id}/submit").status_code == 200
+
+    # No more pages, and no taking one back.
+    assert _upload_page(client, student, question, sub_id).status_code == 409
+    assert client.as_user(student).delete(f"/api/submissions/{sub_id}/pages/0").status_code == 409
+
+
+def test_an_empty_script_cannot_be_handed_in(client, course, question, make_user, db):
+    from models import Submission
+
+    student = make_user(role="student")
+    _enrol(db, course, student)
+
+    sub = Submission(question_id=question.id, student_id=student.id, modality="photo", manifest={})
+    db.add(sub)
+    db.commit()
+
+    res = client.as_user(student).post(f"/api/submissions/{sub.id}/submit")
+    assert res.status_code == 409
+    assert "at least one page" in res.json()["detail"]
+
+
+def test_a_teacher_may_still_change_a_handed_in_script(client, course, question, make_user, db):
+    """Scanning a corrected page on a student's behalf stays possible."""
+    student = make_user(role="student")
+    _enrol(db, course, student)
+
+    sub_id = _upload_page(client, student, question).json()["submission_id"]
+    client.as_user(student).post(f"/api/submissions/{sub_id}/submit")
+
+    teacher = db.query(type(student)).filter_by(id=course.teacher_id).one()
+    assert client.as_user(teacher).delete(f"/api/submissions/{sub_id}/pages/0").status_code == 200
+
+
+def test_another_student_cannot_touch_your_pages(client, course, question, make_user, db):
+    student = make_user(role="student")
+    other = make_user(role="student")
+    _enrol(db, course, student)
+    _enrol(db, course, other)
+
+    sub_id = _upload_page(client, student, question).json()["submission_id"]
+    assert client.as_user(other).delete(f"/api/submissions/{sub_id}/pages/0").status_code == 404
