@@ -301,7 +301,16 @@ export function useUploadSubmission(questionId: string) {
         body: form,
       })
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['submissions', questionId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['submissions', questionId] })
+      // The submission page lists what has arrived so far, and the
+      // assignment row counts it. Without these, adding a second page
+      // uploaded it perfectly well and then showed nothing: the first
+      // page appeared only because setting the submission id started
+      // that query for the first time.
+      qc.invalidateQueries({ queryKey: ['submission-pages'] })
+      qc.invalidateQueries({ queryKey: ['assignments'] })
+    },
   })
 }
 
