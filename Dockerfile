@@ -66,20 +66,27 @@ COPY backend/requirements.txt .
 # scratch, and split the two steps so a network failure in one doesn't
 # discard the layer the other already produced.
 RUN pip install --no-cache-dir --retries 5 --timeout 120 -r requirements.txt
-# Trust what the operating system trusts, as well as what certifi ships.
+# Make certifi's bundle be the operating system's bundle.
 #
-# httpx — and so the Entra token validation that every authenticated
-# request depends on — verifies against certifi's bundle, not the system
+# httpx — and so the Entra token validation every authenticated request
+# depends on — verifies against certifi's bundle rather than the system
 # one. From Korea Central, login.microsoftonline.com is served with a
-# chain whose root is in Debian's store but not in certifi's, so token
-# validation failed with "unable to get local issuer certificate" while
-# the very same image, run from another network, was fine. Every request
-# needing a signed-in user returned "Unable to validate token", and
-# nothing in the application had changed.
+# chain certifi could not verify while the system store could; measured
+# from inside the running container, one returned 200 and the other
+# "unable to get local issuer certificate". Every request needing a
+# signed-in user failed, with nothing in the application changed.
 #
-# Appended rather than replaced: this adds the operating system's roots
-# without discarding certifi's curation.
-RUN cat /etc/ssl/certs/ca-certificates.crt >> "$(python -c 'import certifi; print(certifi.where())')"
+# Two gentler attempts did not hold: appending the system roots to
+# certifi's file, and injecting truststore so Python uses the system
+# store directly. Both left the same failure in place, for reasons not
+# worth more build cycles to pin down.
+#
+# Copying removes the question. certifi.where() then points at the exact
+# bytes already proven to verify Entra from this network, so no code
+# path can pick the bundle that does not work. The cost is losing
+# certifi's own curation in favour of Debian's, which is a trade worth
+# making for an application that cannot authenticate anyone otherwise.
+RUN cp /etc/ssl/certs/ca-certificates.crt "$(python -c 'import certifi; print(certifi.where())')"
 
 RUN python -m playwright install --with-deps chromium \
     && chmod -R a+rX /ms-playwright
