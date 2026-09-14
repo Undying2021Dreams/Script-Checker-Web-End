@@ -108,10 +108,19 @@ function AssignmentRow({ assignment }: { assignment: StudentAssignment }) {
                 'Upload my answer'
               )}
             </Button>
+            {/* `capture` asks a phone for the rear camera directly
+                rather than the file picker, which is the difference
+                between "find the photo you took" and "photograph the
+                page". Desktop browsers ignore it, and a phone still
+                offers the library if the student would rather pick an
+                existing shot — so nothing is lost either way.
+
+                PDFs stay accepted for tablet answers and scanners. */}
             <input
               ref={fileRef}
               type="file"
               accept="image/jpeg,image/png,image/webp,application/pdf"
+              capture="environment"
               onChange={handleFile}
               className="hidden"
             />
