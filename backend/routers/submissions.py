@@ -224,7 +224,14 @@ async def create_submission(
     request: Request,
     question_id: str = Form(...),
     modality: str = Form(...),
-    page_index: int = Form(0),
+    # Omitted means "the next page", which is what every caller
+    # photographing a script actually wants. Passing an explicit index
+    # still replaces that page, which is how a blurry retake is fixed.
+    #
+    # It used to default to 0, and no client ever sent it — so a student
+    # uploading their second page silently overwrote their first, and
+    # nothing said so.
+    page_index: int | None = Form(None),
     image: UploadFile = File(...),
     submission_id: str | None = Form(None),
     user: User = Depends(get_current_user), db: Session = Depends(get_db),
@@ -268,6 +275,9 @@ async def create_submission(
     pages_by_index: dict[int, dict] = {
         p["page_index"]: p for p in ((sub.manifest or {}).get("pages", []) if sub else [])
     }
+
+    if page_index is None:
+        page_index = max(pages_by_index) + 1 if pages_by_index else 0
 
     if sub is None:
         # The row has to exist before extraction stores any crops against

@@ -91,14 +91,32 @@ export function SubmissionsCard({ questionId }: { questionId: string }) {
   }
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+    const files = Array.from(e.target.files ?? [])
+    if (files.length === 0) return
+
+    // A teacher scanning one student's script picks every page of it at
+    // once, so the pages of a selection go into a single submission,
+    // in order. Scanning the next student's script means selecting
+    // again, which starts a new one.
+    let submissionId: string | undefined
+    let done = 0
+
     try {
-      const result = await upload.mutateAsync({ file, modality })
-      toast.success('Uploaded and extracted')
-      navigate(`/submissions/${result.submission_id}`)
+      for (const file of files) {
+        const result = await upload.mutateAsync({ file, modality, submissionId })
+        submissionId = result.submission_id
+        done += 1
+      }
+      toast.success(
+        files.length === 1 ? 'Uploaded and extracted' : `${files.length} pages uploaded`,
+      )
+      if (submissionId) navigate(`/submissions/${submissionId}`)
     } catch (err) {
-      toast.error((err as Error).message)
+      toast.error(
+        done > 0
+          ? `Uploaded ${done} of ${files.length}, then: ${(err as Error).message}`
+          : (err as Error).message,
+      )
     } finally {
       if (fileRef.current) fileRef.current.value = ''
     }
@@ -125,6 +143,7 @@ export function SubmissionsCard({ questionId }: { questionId: string }) {
             ref={fileRef}
             type="file"
             accept="image/jpeg,image/png,image/webp,application/pdf,image/tiff"
+            multiple
             onChange={handleFile}
             className="hidden"
           />
