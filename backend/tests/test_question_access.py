@@ -555,3 +555,48 @@ def test_you_cannot_enrol_in_your_own_course(client, db, make_user):
     res = client.as_user(person).post("/api/courses/join", json={"join_code": "NM0014"})
     assert res.status_code == 409
     assert "teach this course" in res.json()["detail"]
+
+
+# ── A script is more than one page ──────────────────────────────────
+
+def test_uploading_a_second_page_adds_it_rather_than_replacing_the_first(
+    client, course, question, make_user, db
+):
+    """
+    The client used not to send a page index and the server defaulted it
+    to zero, so a student's second page silently overwrote their first
+    and nothing said so.
+    """
+    import io
+
+    student = make_user(role="student")
+    _enrol(db, course, student)
+
+    def upload(submission_id=None, page_index=None):
+        data = {"question_id": question.id, "modality": "photo"}
+        if submission_id:
+            data["submission_id"] = submission_id
+        if page_index is not None:
+            data["page_index"] = str(page_index)
+        return client.as_user(student).post(
+            "/api/submissions",
+            data=data,
+            files={"image": ("p.png", io.BytesIO(b"not a real image"), "image/png")},
+        )
+
+    first = upload()
+    assert first.status_code == 200, first.text
+    sub_id = first.json()["submission_id"]
+    assert [p["page_index"] for p in first.json()["pages"]] == [0]
+
+    second = upload(submission_id=sub_id)
+    assert second.status_code == 200, second.text
+    assert [p["page_index"] for p in second.json()["pages"]] == [0, 1]
+
+    third = upload(submission_id=sub_id)
+    assert [p["page_index"] for p in third.json()["pages"]] == [0, 1, 2]
+
+    # An explicit index still replaces, which is how a blurry retake of
+    # one page is fixed without disturbing the others.
+    retake = upload(submission_id=sub_id, page_index=1)
+    assert [p["page_index"] for p in retake.json()["pages"]] == [0, 1, 2]

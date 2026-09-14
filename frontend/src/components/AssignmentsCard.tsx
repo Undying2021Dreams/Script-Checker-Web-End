@@ -49,19 +49,35 @@ function AssignmentRow({ assignment }: { assignment: StudentAssignment }) {
   }
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+    const files = Array.from(e.target.files ?? [])
+    if (files.length === 0) return
+
+    // One at a time, and in order. Each page is extracted on the server
+    // — markers found, answer boxes cropped — so firing them all at once
+    // would mean several of those running together for one student, and
+    // the pages could be stored out of order.
+    //
+    // The first upload attaches to any existing submission; every page
+    // after it attaches to whatever that returned, so a batch stays one
+    // submission instead of becoming several attempts.
+    let submissionId = assignment.submission_id ?? undefined
+    let done = 0
+
     try {
-      await upload.mutateAsync({
-        file,
-        modality,
-        // Attach to the existing submission so re-uploading a page
-        // replaces it rather than starting a second attempt.
-        submissionId: assignment.submission_id ?? undefined,
-      })
-      toast.success('Answer uploaded')
+      for (const file of files) {
+        const result = await upload.mutateAsync({ file, modality, submissionId })
+        submissionId = result.submission_id
+        done += 1
+      }
+      toast.success(files.length === 1 ? 'Answer uploaded' : `${files.length} pages uploaded`)
     } catch (err) {
-      toast.error((err as Error).message)
+      // Says how far it got: with several pages, "failed" alone leaves
+      // the student unsure whether to send the whole lot again.
+      toast.error(
+        done > 0
+          ? `Uploaded ${done} of ${files.length}, then: ${(err as Error).message}`
+          : (err as Error).message,
+      )
     } finally {
       if (fileRef.current) fileRef.current.value = ''
     }
@@ -103,7 +119,7 @@ function AssignmentRow({ assignment }: { assignment: StudentAssignment }) {
               {upload.isPending ? (
                 <Pending>Uploading…</Pending>
               ) : assignment.submission_id ? (
-                'Replace my answer'
+                'Add more pages'
               ) : (
                 'Upload my answer'
               )}
@@ -121,6 +137,7 @@ function AssignmentRow({ assignment }: { assignment: StudentAssignment }) {
               type="file"
               accept="image/jpeg,image/png,image/webp,application/pdf"
               capture="environment"
+              multiple
               onChange={handleFile}
               className="hidden"
             />
