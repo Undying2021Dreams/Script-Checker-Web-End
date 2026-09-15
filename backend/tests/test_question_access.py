@@ -683,3 +683,56 @@ def test_another_student_cannot_touch_your_pages(client, course, question, make_
 
     sub_id = _upload_page(client, student, question).json()["submission_id"]
     assert client.as_user(other).delete(f"/api/submissions/{sub_id}/pages/0").status_code == 404
+
+
+def test_pages_join_the_open_script_even_without_an_id(client, course, question, make_user, db):
+    """
+    The page used to have to remember which submission it was adding to,
+    and when that was lost — a reload, or the app resumed from the
+    background — the next photograph quietly started a second
+    submission. The student saw one page where they had taken two.
+
+    A student has at most one unfinished answer per question, so the
+    server works it out instead of being told.
+    """
+    from models import Submission
+
+    student = make_user(role="student")
+    _enrol(db, course, student)
+
+    first = _upload_page(client, student, question)
+    assert first.status_code == 200, first.text
+    sub_id = first.json()["submission_id"]
+
+    # No submission_id, exactly as a page that has lost its state sends.
+    second = _upload_page(client, student, question)
+    assert second.status_code == 200, second.text
+
+    assert second.json()["submission_id"] == sub_id, "should join the open script"
+    assert [p["page_index"] for p in second.json()["pages"]] == [0, 1]
+
+    assert db.query(Submission).filter(Submission.student_id == student.id).count() == 1
+
+
+def test_a_handed_in_script_is_not_joined_by_a_later_upload(client, course, question, make_user, db):
+    """Handing in closes it; a later upload must not reopen it."""
+    student = make_user(role="student")
+    _enrol(db, course, student)
+
+    sub_id = _upload_page(client, student, question).json()["submission_id"]
+    client.as_user(student).post(f"/api/submissions/{sub_id}/submit")
+
+    # Refused outright rather than quietly starting a second script.
+    assert _upload_page(client, student, question).status_code == 409
+
+
+def test_a_teacher_uploading_starts_a_new_script_each_time(client, course, question, make_user, db):
+    """A teacher works through a stack; each script is its own submission."""
+    from models import Submission, User
+
+    teacher = db.query(User).filter_by(id=course.teacher_id).one()
+
+    first = _upload_page(client, teacher, question)
+    second = _upload_page(client, teacher, question)
+    assert first.json()["submission_id"] != second.json()["submission_id"]
+    assert db.query(Submission).filter(Submission.question_id == question.id).count() == 2
