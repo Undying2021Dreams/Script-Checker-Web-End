@@ -320,6 +320,31 @@ async def create_submission(
                 status_code=400,
                 detail=f"Submission {submission_id} belongs to a different question ({sub.question_id}).",
             )
+    elif user.role != "admin":
+        # No id given: add to the script this student already has open,
+        # if there is one.
+        #
+        # A student has at most one unfinished answer per question, so
+        # the server can work this out and does not need telling. It
+        # used to depend on the page remembering an id between taps, and
+        # when that was lost — a reload, the app resumed from the
+        # background — the next photograph silently began a second
+        # submission instead of joining the first. The student saw one
+        # page where they had taken two.
+        #
+        # Only for the student's own work. A teacher photographing a
+        # stack of scripts wants each one to start a new submission.
+        sub = (
+            db.query(Submission)
+            .filter(
+                Submission.question_id == question_id,
+                Submission.student_id == user.id,
+                Submission.submitted_at.is_(None),
+                Submission.grading_status != "graded",
+            )
+            .order_by(Submission.created_at.desc())
+            .first()
+        )
 
     sub_id = sub.id if sub else str(uuid.uuid4())
     pages_by_index: dict[int, dict] = {
