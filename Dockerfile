@@ -66,27 +66,27 @@ COPY backend/requirements.txt .
 # scratch, and split the two steps so a network failure in one doesn't
 # discard the layer the other already produced.
 RUN pip install --no-cache-dir --retries 5 --timeout 120 -r requirements.txt
-# Make certifi's bundle be the operating system's bundle.
+# Trust the Microsoft TLS roots explicitly.
 #
-# httpx — and so the Entra token validation every authenticated request
-# depends on — verifies against certifi's bundle rather than the system
-# one. From Korea Central, login.microsoftonline.com is served with a
-# chain certifi could not verify while the system store could; measured
-# from inside the running container, one returned 200 and the other
-# "unable to get local issuer certificate". Every request needing a
-# signed-in user failed, with nothing in the application changed.
+# login.microsoftonline.com is served with a chain ending at "Microsoft
+# TLS RSA Root G2", which neither certifi's bundle nor Debian's carries
+# — they have Microsoft's 2017 roots and DigiCert's, not that one. It
+# normally verifies anyway because the server also sends that root
+# cross-signed by DigiCert Global Root G2, bridging to something both
+# bundles do trust. Nodes that omit the bridge leave the chain ending at
+# an unknown root, and OpenSSL says "unable to get local issuer
+# certificate".
 #
-# Two gentler attempts did not hold: appending the system roots to
-# certifi's file, and injecting truststore so Python uses the system
-# store directly. Both left the same failure in place, for reasons not
-# worth more build cycles to pin down.
+# That is why Entra token validation failed on some replicas and not
+# others, with nothing in the application changed, and why two earlier
+# attempts looked like they worked: swapping bundles around changed
+# nothing about the missing root, so whether it failed came down to
+# which node answered.
 #
-# Copying removes the question. certifi.where() then points at the exact
-# bytes already proven to verify Entra from this network, so no code
-# path can pick the bundle that does not work. The cost is losing
-# certifi's own curation in favour of Debian's, which is a trade worth
-# making for an application that cannot authenticate anyone otherwise.
-RUN cp /etc/ssl/certs/ca-certificates.crt "$(python -c 'import certifi; print(certifi.where())')"
+# See backend/certs/microsoft-tls-roots.pem for provenance.
+COPY backend/certs/microsoft-tls-roots.pem /usr/local/share/microsoft-tls-roots.pem
+RUN cat /usr/local/share/microsoft-tls-roots.pem >> "$(python -c 'import certifi; print(certifi.where())')" \
+    && cat /usr/local/share/microsoft-tls-roots.pem >> /etc/ssl/certs/ca-certificates.crt
 
 RUN python -m playwright install --with-deps chromium \
     && chmod -R a+rX /ms-playwright
