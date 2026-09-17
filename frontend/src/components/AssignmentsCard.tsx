@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import { Pending, StatusPill } from '@/components/ui/feedback'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { apiFetchBlobUrl } from '@/lib/api'
+import { openAuthedPdf } from '@/lib/pdf'
 import { useAssignments } from '@/lib/queries'
 import type { StudentAssignment } from '@/lib/types'
 
@@ -39,9 +39,14 @@ function AssignmentRow({ assignment, courseId }: { assignment: StudentAssignment
     if (opening) return
     setOpening(true)
     try {
-      const url = await apiFetchBlobUrl(`/student/assignments/${assignment.question_id}/pdf`)
-      window.open(url, '_blank')
-      setTimeout(() => URL.revokeObjectURL(url), 60_000)
+      const name = `${assignment.title || 'paper'}.pdf`.replace(/[/\\]/g, '-')
+      const how = await openAuthedPdf(
+        `/student/assignments/${assignment.question_id}/pdf`,
+        name,
+      )
+      if (how === 'download') {
+        toast.success('Your browser blocked the new tab, so the paper was saved instead.')
+      }
     } catch (err) {
       toast.error(`Could not open the paper: ${(err as Error).message}`)
     } finally {

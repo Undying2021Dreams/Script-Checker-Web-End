@@ -135,7 +135,7 @@ def test_a_split_answer_box_never_leaves_a_strip_too_small_to_write_in():
     # A fixed physical size, not the module's own constant: asserting a
     # strip is at least MIN_SEGMENT_H tall when MIN_SEGMENT_H is what
     # produced it proves nothing, and passed at the old 20px.
-    smallest_usable_inches = 0.8
+    smallest_usable_inches = 1.2
 
     worst = None
     for filler in range(14, 32):
