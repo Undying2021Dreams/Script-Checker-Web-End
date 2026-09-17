@@ -224,16 +224,31 @@ def pair_answer_boxes_with_ground_truth(content_doc: dict | None) -> dict[str, l
 # mark while the scheme beside them was worth ten.
 _SCHEME_ITEM_RE = re.compile(r"(\d+(?:\.\d+)?)\s*marks?\b", re.IGNORECASE)
 
-# A figure the teacher has named as the whole, in either order:
-# "Total: 10 marks", "worth 10 marks", "Max marks - 13", "out of 8".
+# A figure the teacher has named as the whole, and the rest of the line
+# it sits on.
 #
-# Both orders matter. A scheme ending "Max marks - 13" puts the number
-# after the word, and reading only "N marks" missed it entirely — then
-# summed the criteria above it to 30 for a paper worth 13.
+# The line is taken whole rather than the first number after the
+# keyword, because teachers show their working: "Max obtainable marks -
+# 2+1+10 = 13 marks" states the answer after the sum, and reading the
+# first number gives 2 for a question worth 13.
+# The tail stops before a second such word, so "step A is worth 5 marks,
+# step B is worth 5 marks" stays two statements rather than the first
+# swallowing the second and being mistaken for the whole.
+_SCHEME_KEYWORDS = r"total|maximum|max|out of|worth"
 _SCHEME_WHOLE_RE = re.compile(
-    r"(?:total|maximum|max|out of|worth)\b[^.\n]{0,20}?(\d+(?:\.\d+)?)",
+    rf"(?:{_SCHEME_KEYWORDS})\b((?:(?!(?:{_SCHEME_KEYWORDS})\b)[^.\n]){{0,48}})",
     re.IGNORECASE,
 )
+
+
+def _stated_total(tail: str) -> float | None:
+    """The figure a "max marks" phrase actually names."""
+    # "2+1+10 = 13 marks" — the total is what the sum comes to, not its
+    # first term.
+    if "=" in tail:
+        tail = tail.rsplit("=", 1)[1]
+    match = re.search(r"(\d+(?:\.\d+)?)", tail)
+    return float(match.group(1)) if match else None
 
 
 def marking_scheme_total(text: str | None) -> int | None:
@@ -243,9 +258,8 @@ def marking_scheme_total(text: str | None) -> int | None:
     A figure the teacher names as the whole wins over summing the parts,
     and settles cases no amount of adding up could. Schemes routinely
     offer alternative routes — "any other valid solution - 12 marks" is
-    not a thirteenth criterion to be added on top — and nothing in the
-    text distinguishes an alternative from an extra. A stated maximum
-    does, which is why it is taken first.
+    not a further criterion to be added on top — and nothing in the text
+    distinguishes an alternative from an extra. A stated maximum does.
 
     That only holds when exactly one figure is named that way. "Step A
     is worth 5 marks, step B is worth 5 marks" names two, neither of
@@ -259,9 +273,9 @@ def marking_scheme_total(text: str | None) -> int | None:
     if not text:
         return None
 
-    stated = _SCHEME_WHOLE_RE.findall(text)
+    stated = [v for v in (_stated_total(t) for t in _SCHEME_WHOLE_RE.findall(text)) if v]
     if len(stated) == 1:
-        value = float(stated[0])
+        value = stated[0]
     else:
         found = _SCHEME_ITEM_RE.findall(text)
         if not found:
