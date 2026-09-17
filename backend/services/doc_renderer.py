@@ -507,12 +507,23 @@ window.__ready = true;
 
 # ── Pagination simulation ────────────────────────────────────────────
 
+# Canonical px, so this is an inch of paper at 150 DPI.
+#
+# A box taller than the space left on the page is split, and the strip
+# left behind used to be allowed down to 20px — two millimetres. Worse,
+# the guard against starting a box in a sliver applied only to boxes
+# that fit on a page, so a box that crossed a page could open with a few
+# millimetres at the bottom of one sheet and leave a matching sliver at
+# the top of another. A strip nobody can write in is worse than a page
+# break: it takes the room and gives nothing back.
+MIN_SEGMENT_H = 150.0
+
+
 def _paginate(blocks: list[dict], rects: list[dict], usable_h: float):
     """
     Simulate multi-page layout based on measured block heights and tops.
     Answer boxes are split into segments across pages to maximize usable space.
     """
-    MIN_ANSWER_BOX_SPACE = 80.0  # px — min remaining height on page to start a segment
 
     page_of_block: list[int] = []
     answer_layout: dict = {}
@@ -528,7 +539,7 @@ def _paginate(blocks: list[dict], rects: list[dict], usable_h: float):
         if bid:
             remaining_space = usable_h - offset_y
 
-            if h <= usable_h and remaining_space < MIN_ANSWER_BOX_SPACE and offset_y > 0:
+            if remaining_space < MIN_SEGMENT_H and offset_y > 0:
                 current_page += 1
                 page_start_y = natural_top
                 offset_y = 0.0
@@ -541,21 +552,43 @@ def _paginate(blocks: list[dict], rects: list[dict], usable_h: float):
 
             while remaining_h > 0:
                 avail = max(0.0, usable_h - seg_y)
-                if avail < 20.0 and remaining_h > 20.0:
+                if avail < MIN_SEGMENT_H and seg_y > 0:
                     seg_page += 1
                     seg_y = 0.0
                     avail = usable_h
 
                 seg_h = min(remaining_h, avail)
+
+                # The last strip. Better a box slightly taller than
+                # asked for than a final strip too shallow to use —
+                # minHeight is a minimum, so there is room to give.
+                if seg_h >= remaining_h and seg_h < MIN_SEGMENT_H:
+                    seg_h = min(MIN_SEGMENT_H, avail)
+
+                # A strip that would leave an unusable remainder hands
+                # the remainder its minimum, if it can spare it.
+                tail = remaining_h - seg_h
+                if 0 < tail < MIN_SEGMENT_H and seg_h - (MIN_SEGMENT_H - tail) >= MIN_SEGMENT_H:
+                    seg_h -= MIN_SEGMENT_H - tail
+
                 segments.append((seg_page, seg_y, seg_h))
                 remaining_h -= seg_h
                 if remaining_h > 0:
                     seg_page += 1
                     seg_y = 0.0
 
+            # A box tall enough to need a second page is never a narrow
+            # column. The width a teacher picks suits a short answer in
+            # one spot on one sheet; a two-page answer is not that, and
+            # a half-width strip continuing overleaf reads as a
+            # different box rather than the rest of the same one.
+            width_percent = b.get("width_percent", 100)
+            if len(segments) > 1:
+                width_percent = 100
+
             answer_layout[bid] = {
                 "segments": segments,
-                "width_percent": b.get("width_percent", 100),
+                "width_percent": width_percent,
                 "total_h": h,
                 "order": i,
             }

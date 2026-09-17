@@ -184,7 +184,14 @@ export function QuestionEditorPage() {
     }
   }
 
+  // Rendering a paper takes seconds, and the button said nothing while
+  // it did. Pressing it again does not make it faster — it starts a
+  // second render and opens a second tab.
+  const [openingPdf, setOpeningPdf] = useState(false)
+
   const handleOpenPdf = async () => {
+    if (openingPdf) return
+    setOpeningPdf(true)
     try {
       // The PDF endpoint needs a bearer token, so it has to be fetched
       // rather than linked to directly.
@@ -194,6 +201,8 @@ export function QuestionEditorPage() {
       setTimeout(() => URL.revokeObjectURL(url), 60_000)
     } catch (err) {
       toast.error(`Could not open the PDF: ${(err as Error).message}`)
+    } finally {
+      setOpeningPdf(false)
     }
   }
 
@@ -279,8 +288,8 @@ export function QuestionEditorPage() {
           {isFinalized ? (
             <>
               <Badge variant="secondary">Finalized</Badge>
-              <Button variant="outline" onClick={handleOpenPdf}>
-                Open PDF
+              <Button variant="outline" onClick={handleOpenPdf} disabled={openingPdf}>
+                {openingPdf ? <Pending>Opening…</Pending> : 'Open PDF'}
               </Button>
               {/* The only way to change a finalized paper: its layout and
                   printed markers are frozen, so edits go into a fresh copy. */}

@@ -1,7 +1,8 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 
-import { StatusPill } from '@/components/ui/feedback'
+import { Pending, StatusPill } from '@/components/ui/feedback'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { apiFetchBlobUrl } from '@/lib/api'
@@ -28,13 +29,23 @@ function MarkOrStatus({ a }: { a: StudentAssignment }) {
 }
 
 function AssignmentRow({ assignment, courseId }: { assignment: StudentAssignment; courseId: string }) {
+  // The paper is fetched, not linked to, because the endpoint wants a
+  // bearer token — so there is a wait, and the button has to show it.
+  // Without that the only feedback is nothing happening, and pressing
+  // again just opens another tab.
+  const [opening, setOpening] = useState(false)
+
   const openPaper = async () => {
+    if (opening) return
+    setOpening(true)
     try {
       const url = await apiFetchBlobUrl(`/student/assignments/${assignment.question_id}/pdf`)
       window.open(url, '_blank')
       setTimeout(() => URL.revokeObjectURL(url), 60_000)
     } catch (err) {
       toast.error(`Could not open the paper: ${(err as Error).message}`)
+    } finally {
+      setOpening(false)
     }
   }
 
@@ -61,8 +72,8 @@ function AssignmentRow({ assignment, courseId }: { assignment: StudentAssignment
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" variant="outline" onClick={openPaper}>
-          Open paper
+        <Button size="sm" variant="outline" onClick={openPaper} disabled={opening}>
+          {opening ? <Pending>Opening…</Pending> : 'Open paper'}
         </Button>
 
         {!assignment.handed_in && (
