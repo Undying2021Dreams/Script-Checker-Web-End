@@ -1,8 +1,8 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
-import { PaperImage } from '@/components/Paper'
+import { PaperImage, PaperSurface } from '@/components/Paper'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -24,6 +24,20 @@ import {
   useUploadSubmission,
 } from '@/lib/queries'
 
+/** A photograph taken but not yet sent. */
+type Queued = {
+  key: string
+  file: File
+  /** Shown immediately, from the phone's own copy. */
+  preview: string
+  /** 1-based, as the student said it. */
+  pageNumber: number
+  status: 'waiting' | 'uploading' | 'failed'
+  error?: string
+}
+
+let nextKey = 0
+
 /**
  * Where a student assembles a script and hands it in.
  *
@@ -32,11 +46,13 @@ import {
  * student said "that's my answer". Photographing several pages of
  * handwriting is not one action, so it gets a page of its own.
  *
- * Pages upload as they are added rather than being held until the end.
- * A phone on a patchy connection is the normal case, and losing four
- * photographs because the last one failed would be far worse than
- * uploading them one at a time. What the student controls is what the
- * script contains, and when it is finished.
+ * Photographs are queued and sent one at a time in the background. The
+ * camera used to be disabled until each upload came back, which meant
+ * standing over the desk waiting between pages — the upload is the
+ * slow part and the student has nothing to do with it. Sending them
+ * one at a time rather than all at once is deliberate: the first
+ * upload is what creates the submission, and several racing to create
+ * it is the bug that once split one script across four.
  */
 export function SubmitPage() {
   const { questionId = '' } = useParams()
@@ -45,9 +61,21 @@ export function SubmitPage() {
 
   const courseId = params.get('course') ?? ''
   const [submissionId, setSubmissionId] = useState<string | null>(params.get('submission'))
-  // Held while asking which page an unreadable photograph belongs to.
-  const [naming, setNaming] = useState<{ file: File; message: string } | null>(null)
-  const [namedPage, setNamedPage] = useState('')
+  // The queue worker runs outside React's render, so it reads the id
+  // from here rather than from state it may have closed over. Only the
+  // worker changes it, and it does so as soon as the server answers —
+  // before the state it also sets has been applied.
+  const submissionIdRef = useRef(submissionId)
+
+  const [queue, setQueue] = useState<Queued[]>([])
+  const sending = useRef(false)
+  // Bumped when an upload settles, so the worker looks for more work
+  // even when the queue itself did not change shape.
+  const [tick, setTick] = useState(0)
+
+  // Held between choosing a photograph and saying which page it is.
+  const [asking, setAsking] = useState<{ files: File[]; preview: string } | null>(null)
+  const [pageNumber, setPageNumber] = useState('')
 
   const cameraRef = useRef<HTMLInputElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -59,59 +87,96 @@ export function SubmitPage() {
 
   const pages = data?.pages ?? []
 
-  const send = async (file: File, id: string | undefined, pageIndex?: number) => {
-    const result = await upload.mutateAsync({ file, modality: 'photo', submissionId: id, pageIndex })
-    setSubmissionId(result.submission_id)
-    return result.submission_id
-  }
+  // What to offer as the next page number: one past the highest page
+  // either sent or waiting, so photographing pages in order is a
+  // matter of accepting what is already filled in.
+  const suggestedPage = Math.max(
+    0,
+    ...pages.map((p) => p.page_index + 1),
+    ...queue.map((q) => q.pageNumber),
+  ) + 1
 
-  const addFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const chooseFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? [])
+    if (cameraRef.current) cameraRef.current.value = ''
+    if (fileRef.current) fileRef.current.value = ''
     if (files.length === 0) return
 
-    let id = submissionId ?? undefined
-    let done = 0
-    try {
-      for (const file of files) {
-        id = await send(file, id)
-        done += 1
-      }
-      toast.success(files.length === 1 ? 'Page added' : `${files.length} pages added`)
-    } catch (err) {
-      const message = (err as Error).message
-      // The page could not identify itself and nothing is wrong with the
-      // photograph as such, so offer the way out the paper provides:
-      // read the printed page number and say which one it is.
-      if (/which page/i.test(message)) {
-        setNaming({ file: files[done], message })
-      } else {
-        toast.error(
-          done > 0 ? `Added ${done} of ${files.length}, then: ${message}` : message,
-        )
-      }
-    } finally {
-      if (cameraRef.current) cameraRef.current.value = ''
-      if (fileRef.current) fileRef.current.value = ''
-    }
+    // Asked here, while the photograph is in hand, rather than after a
+    // failed upload has come back to say the codes could not be read.
+    // On a phone that answer was needed nearly every time, so waiting
+    // to ask for it only added a round trip to every page.
+    setPageNumber(String(suggestedPage))
+    setAsking({ files, preview: URL.createObjectURL(files[0]) })
   }
 
-  const addNamedPage = async () => {
-    if (!naming) return
-    const n = Number(namedPage)
-    if (!Number.isInteger(n) || n < 1) {
+  const enqueue = () => {
+    if (!asking) return
+    const first = Number(pageNumber)
+    if (!Number.isInteger(first) || first < 1) {
       toast.error('Give the page number printed at the bottom of the sheet.')
       return
     }
-    try {
-      // Printed as "Page 1 of n"; stored from zero.
-      await send(naming.file, submissionId ?? undefined, n - 1)
-      toast.success(`Added as page ${n}`)
-      setNaming(null)
-      setNamedPage('')
-    } catch (err) {
-      toast.error((err as Error).message)
-    }
+    setQueue((q) => [
+      ...q,
+      ...asking.files.map((file, i) => ({
+        key: `q${nextKey++}`,
+        file,
+        preview: i === 0 ? asking.preview : URL.createObjectURL(file),
+        pageNumber: first + i,
+        status: 'waiting' as const,
+      })),
+    ])
+    setAsking(null)
+    setPageNumber('')
   }
+
+  const discardAsked = () => {
+    if (asking) URL.revokeObjectURL(asking.preview)
+    setAsking(null)
+    setPageNumber('')
+  }
+
+  const drop = (key: string) =>
+    setQueue((q) => {
+      const item = q.find((it) => it.key === key)
+      if (item) URL.revokeObjectURL(item.preview)
+      return q.filter((it) => it.key !== key)
+    })
+
+  // One at a time, in the order they were taken.
+  useEffect(() => {
+    if (sending.current) return
+    const next = queue.find((it) => it.status === 'waiting')
+    if (!next) return
+
+    sending.current = true
+    setQueue((q) => q.map((it) => (it.key === next.key ? { ...it, status: 'uploading' } : it)))
+
+    void (async () => {
+      try {
+        const result = await upload.mutateAsync({
+          file: next.file,
+          modality: 'photo',
+          submissionId: submissionIdRef.current ?? undefined,
+          pageIndexHint: next.pageNumber - 1,
+        })
+        submissionIdRef.current = result.submission_id
+        setSubmissionId(result.submission_id)
+        setQueue((q) => q.filter((it) => it.key !== next.key))
+        URL.revokeObjectURL(next.preview)
+      } catch (err) {
+        const message = (err as Error).message
+        setQueue((q) =>
+          q.map((it) => (it.key === next.key ? { ...it, status: 'failed', error: message } : it)),
+        )
+        toast.error(`Page ${next.pageNumber}: ${message}`)
+      } finally {
+        sending.current = false
+        setTick((t) => t + 1)
+      }
+    })()
+  }, [queue, tick, upload])
 
   const submit = async () => {
     try {
@@ -122,6 +187,8 @@ export function SubmitPage() {
       toast.error((err as Error).message)
     }
   }
+
+  const waiting = queue.filter((q) => q.status !== 'failed').length
 
   return (
     <div className="space-y-5">
@@ -134,18 +201,26 @@ export function SubmitPage() {
         }
         description={
           pages.length > 0
-            ? `${pages.length} page${pages.length === 1 ? '' : 's'} ready to hand in`
+            ? `${pages.length} page${pages.length === 1 ? '' : 's'} ready to hand in` +
+              (waiting > 0 ? `, ${waiting} still sending` : '')
             : 'Photograph each page of your answer, then hand it in.'
         }
       />
 
       <div className="flex flex-wrap gap-2">
-        <Button onClick={() => cameraRef.current?.click()} disabled={upload.isPending}>
-          {upload.isPending ? <Pending>Adding…</Pending> : 'Take a photo'}
-        </Button>
-        <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={upload.isPending}>
+        {/* Never disabled while an upload runs. Waiting for the network
+            between pages was the whole complaint. */}
+        <Button onClick={() => cameraRef.current?.click()}>Take a photo</Button>
+        <Button variant="outline" onClick={() => fileRef.current?.click()}>
           Choose files
         </Button>
+        {waiting > 0 && (
+          <StatusPill tone="info">
+            <Pending>
+              Sending {waiting} page{waiting === 1 ? '' : 's'}
+            </Pending>
+          </StatusPill>
+        )}
 
         {/* One photo at a time from the camera; as many as you like from
             the picker. `capture` hands back a single image and can stop
@@ -155,7 +230,7 @@ export function SubmitPage() {
           type="file"
           accept="image/jpeg,image/png,image/webp"
           capture="environment"
-          onChange={addFiles}
+          onChange={chooseFiles}
           className="hidden"
         />
         <input
@@ -163,36 +238,50 @@ export function SubmitPage() {
           type="file"
           accept="image/jpeg,image/png,image/webp,application/pdf"
           multiple
-          onChange={addFiles}
+          onChange={chooseFiles}
           className="hidden"
         />
       </div>
 
-      {/* The photograph is fine; its printed codes just could not be
-          read. The sheet says which page it is, so ask rather than
-          refuse outright. */}
-      <Dialog open={!!naming} onOpenChange={(open) => !open && setNaming(null)}>
+      {/* Asked before sending, not after failing. The number is only
+          used if the printed codes cannot be read, so a wrong guess on
+          a readable page costs nothing. */}
+      <Dialog open={!!asking} onOpenChange={(open) => !open && discardAsked()}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Which page is this?</DialogTitle>
+            <DialogTitle>
+              {(asking?.files.length ?? 0) > 1 ? 'Which page do these start at?' : 'Which page is this?'}
+            </DialogTitle>
             <DialogDescription>
-              {naming?.message} Look at the bottom of the sheet — it is printed there.
+              It is printed at the bottom of the sheet. If the codes on the page can be read,
+              they are used instead and this is ignored.
             </DialogDescription>
           </DialogHeader>
+
+          {asking && (
+            <img
+              src={asking.preview}
+              alt="The photograph you just took"
+              className="max-h-48 w-full rounded-md object-contain"
+            />
+          )}
+
           <div className="space-y-2">
             <Label htmlFor="page-number">Page number</Label>
             <Input
               id="page-number"
-              value={namedPage}
-              onChange={(e) => setNamedPage(e.target.value)}
+              value={pageNumber}
+              onChange={(e) => setPageNumber(e.target.value)}
               inputMode="numeric"
+              autoFocus
               placeholder="e.g. 2"
             />
           </div>
+
           <DialogFooter>
             <DialogClose render={<Button variant="ghost">Take it again instead</Button>} />
-            <Button onClick={addNamedPage} disabled={upload.isPending || !namedPage.trim()}>
-              {upload.isPending ? <Pending>Adding…</Pending> : 'Add this page'}
+            <Button onClick={enqueue} disabled={!pageNumber.trim()}>
+              Add this page
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -200,7 +289,7 @@ export function SubmitPage() {
 
       {isLoading && <CardSkeleton rows={3} />}
 
-      {!isLoading && pages.length === 0 && (
+      {!isLoading && pages.length === 0 && queue.length === 0 && (
         <EmptyState
           title="No pages yet"
           hint="Take a photo of your first page. You can add more, and remove any that came out badly, before handing in."
@@ -208,13 +297,68 @@ export function SubmitPage() {
       )}
 
       <div className="space-y-4">
-        {pages.map((page, i) => (
+        {/* Still on the phone. Shown in the same list as the rest, so a
+            page that has been taken is visible whether or not the
+            network has caught up with it. */}
+        {queue.map((item) => (
+          <div key={item.key} className="space-y-2">
+            <PaperSurface
+              kind="student"
+              caption={`Page ${item.pageNumber}`}
+            >
+              <img
+                src={item.preview}
+                alt={`Page ${item.pageNumber} of your answer`}
+                className="max-h-[28rem] w-full object-contain opacity-70"
+              />
+            </PaperSurface>
+            <div className="flex items-center gap-2 px-1">
+              {item.status === 'failed' ? (
+                <StatusPill tone="danger">{item.error || "Couldn't be sent"}</StatusPill>
+              ) : (
+                <StatusPill tone="info">
+                  <Pending>{item.status === 'uploading' ? 'Sending' : 'Waiting'}</Pending>
+                </StatusPill>
+              )}
+              {item.status === 'failed' && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() =>
+                    setQueue((q) =>
+                      q.map((it) =>
+                        it.key === item.key ? { ...it, status: 'waiting', error: undefined } : it,
+                      ),
+                    )
+                  }
+                >
+                  Try again
+                </Button>
+              )}
+              {item.status !== 'uploading' && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="ml-auto text-destructive"
+                  onClick={() => drop(item.key)}
+                >
+                  Remove
+                </Button>
+              )}
+            </div>
+          </div>
+        ))}
+
+        {pages.map((page) => (
           <div key={page.page_index} className="space-y-2">
+            {/* The page's own number, not its position in this list. A
+                student who photographs page 5 first was shown "Page 1"
+                beside the number they had just typed. */}
             <PaperImage
               kind="student"
               path={`/submissions/${submissionId}/images/${page.page_index}`}
-              alt={`Page ${i + 1} of your answer`}
-              caption={`Page ${i + 1}`}
+              alt={`Page ${page.page_index + 1} of your answer`}
+              caption={`Page ${page.page_index + 1}`}
             />
             <div className="flex items-center gap-2 px-1">
               {page.error ? (
@@ -247,7 +391,13 @@ export function SubmitPage() {
 
       {pages.length > 0 && (
         <Dialog>
-          <DialogTrigger render={<Button className="w-full sm:w-auto">Hand in my answer</Button>} />
+          <DialogTrigger
+            render={
+              <Button className="w-full sm:w-auto" disabled={waiting > 0}>
+                {waiting > 0 ? `Sending ${waiting} page${waiting === 1 ? '' : 's'}…` : 'Hand in my answer'}
+              </Button>
+            }
+          />
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Hand in {pages.length} page{pages.length === 1 ? '' : 's'}?</DialogTitle>

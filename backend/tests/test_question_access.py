@@ -1006,3 +1006,92 @@ def test_cloning_a_question_that_has_an_image(client, db, make_user):
     srcs = [n["attrs"]["src"] for n in clone.content["content"] if n.get("type") == "image"]
     assert srcs and copies[0].id in srcs[0], srcs
     assert image.id not in srcs[0], "clone still points at the original's image"
+
+
+def test_the_page_number_a_student_types_does_not_override_the_printed_codes(client, course, db):
+    """
+    The student is asked which page they have just photographed, before
+    anyone knows whether its codes will read. That answer is a hint.
+
+    A number typed from memory is weaker evidence than a code printed on
+    the sheet, so where the codes read, they win. Sent as `page_index`
+    instead it would be an instruction, and a student who miscounted
+    would file page two over the top of page one and lose it.
+    """
+    import io
+
+    from pdf2image import convert_from_bytes
+
+    from services import extractor
+
+    if not extractor._zbar_available():
+        pytest.skip("no zbar here, so no page can identify itself and the rule cannot be tested")
+
+    content = {
+        "type": "doc",
+        "content": [
+            {"type": "paragraph", "content": [{"type": "text", "text": "Question one."}]},
+            {"type": "answerBox", "attrs": {"id": "p1", "label": "a", "points": 5,
+                                            "minHeight": 1400}},
+            {"type": "answerBox", "attrs": {"id": "p2", "label": "b", "points": 5,
+                                            "minHeight": 1400}},
+        ],
+    }
+    created = client.as_user(course.teacher).post(
+        "/api/questions", params={"course_id": course.id}, json={}
+    ).json()
+    qid = created["question_id"]
+    client.as_user(course.teacher).put(
+        f"/api/questions/{qid}/blocks",
+        json={
+            "content": content,
+            "answer_boxes": [{"id": "p1", "label": "a", "points": 5},
+                             {"id": "p2", "label": "b", "points": 5}],
+            "ground_truth_boxes": [],
+        },
+    )
+    assert client.as_user(course.teacher).post(f"/api/questions/{qid}/finalize").status_code == 200
+
+    pdf = client.as_user(course.teacher).get(f"/api/questions/{qid}/pdf").content
+    rendered = convert_from_bytes(pdf, dpi=200, fmt="png")
+    assert len(rendered) >= 2, "this paper was supposed to run to two pages"
+
+    buf = io.BytesIO()
+    rendered[1].save(buf, format="PNG")
+
+    # Says page one; the sheet itself says page two.
+    res = client.as_user(course.teacher).post(
+        "/api/submissions",
+        data={"question_id": qid, "modality": "photo", "page_index_hint": "0"},
+        files={"image": ("page.png", buf.getvalue(), "image/png")},
+    )
+    assert res.status_code == 200, res.text
+    stored = [p["page_index"] for p in res.json()["pages"]]
+    assert stored == [1], f"the typed number overrode the printed codes: landed at {stored}"
+
+
+def test_a_page_whose_codes_cannot_be_read_is_filed_where_the_student_said(
+    client, course, question, make_user, db, pages_without_codes
+):
+    """
+    The other half of the rule. Where nothing can be read off the sheet,
+    the number the student typed as they took the photograph is what
+    there is to go on — and it beats the order the files happened to
+    arrive in, which is what this fell back to before.
+
+    It also means no second round trip: the upload used to fail with
+    "which page is this?", wait for an answer, and be sent again. On a
+    phone, where the printed codes rarely survive the photograph, that
+    was nearly every page.
+    """
+    student = make_user()
+    db.add(Enrollment(course_id=course.id, student_id=student.id))
+    db.commit()
+
+    res = client.as_user(student).post(
+        "/api/submissions",
+        data={"question_id": question.id, "modality": "photo", "page_index_hint": "4"},
+        files={"image": ("page.png", _photo_bytes(), "image/png")},
+    )
+    assert res.status_code == 200, res.text
+    assert [p["page_index"] for p in res.json()["pages"]] == [4]
