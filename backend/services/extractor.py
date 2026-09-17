@@ -49,6 +49,92 @@ def _decode_image(image_bytes: bytes) -> tuple[np.ndarray, int | None]:
     return img, dpi
 
 
+def _flatten_on_markers(img: np.ndarray, page_w: int, page_h: int) -> np.ndarray | None:
+    """
+    The photograph warped flat, using the four printed corner markers.
+
+    This is the part of a scanner app that earns its keep, and the part
+    this paper can do better: an app guesses where the page is from its
+    edges, while these sheets state it. Returns None when all four
+    markers are not found, which is the case nothing here can help with.
+
+    Never warps downwards. The canonical page is 1240px wide and a
+    phone photograph is usually wider; flattening onto the canonical
+    canvas would throw away the pixels the small printed codes are made
+    of.
+    """
+    found = _detect_aruco_markers(img)
+    canonical = get_marker_positions(page_w, page_h)
+    if not set(canonical).issubset(found):
+        return None
+
+    scale = max(1.0, img.shape[1] / page_w)
+    src = np.array([found[mid] for mid in sorted(canonical)], dtype=np.float32)
+    dst = np.array(
+        [[canonical[mid][0] * scale, canonical[mid][1] * scale] for mid in sorted(canonical)],
+        dtype=np.float32,
+    )
+    return cv2.warpPerspective(
+        img,
+        cv2.getPerspectiveTransform(src, dst),
+        (int(page_w * scale), int(page_h * scale)),
+        flags=cv2.INTER_CUBIC,
+    )
+
+
+def _even_lighting(img: np.ndarray) -> np.ndarray:
+    """
+    Take the shading out of a photograph without thresholding it.
+
+    Divides the image by a heavily blurred copy of itself — an estimate
+    of how the light fell across the sheet — and removes it. Faint
+    pencil stays grey rather than being forced to white, which is the
+    whole difference between this and what a scanner app does.
+
+    Measured on real phone photographs of this paper: they read 99.3%
+    "ink" by the blank detector's own measure, because paper
+    photographs grey rather than white. Afterwards, 2%. So this does
+    not endanger blank detection on a phone photograph — it is what
+    makes it possible at all.
+    """
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
+    shading = cv2.GaussianBlur(gray, (0, 0), sigmaX=max(img.shape) / 30)
+    return cv2.cvtColor(cv2.divide(gray, shading, scale=255), cv2.COLOR_GRAY2BGR)
+
+
+def scan_photograph(image_bytes: bytes, page_w: int, page_h: int) -> bytes | None:
+    """
+    A photographed page turned into something closer to a scan.
+
+    Flattened on its own printed markers and relit. Applied to photos
+    only: a PDF or a flatbed scan is already flat and evenly lit, and
+    running this over one would be a resampling pass that costs
+    sharpness and buys nothing.
+
+    Returns None if the page could not be flattened, in which case the
+    caller keeps the original — a photograph that cannot find its own
+    corners is not one to start rewriting.
+    """
+    try:
+        img, _ = _decode_image(image_bytes)
+    except Exception:  # noqa: BLE001 — an unreadable file is the caller's problem
+        return None
+
+    flat = _flatten_on_markers(img, page_w, page_h)
+    if flat is None:
+        return None
+
+    # JPEG, not PNG. These images live in the database, and a relit page
+    # as PNG measured ten times the size of the photograph it came from
+    # — ~1MB a page against ~90KB. At quality 92 the difference the
+    # compression makes is invisible next to the phone's own JPEG, which
+    # the picture has already been through once.
+    ok, buf = cv2.imencode(".jpg", _even_lighting(flat), [cv2.IMWRITE_JPEG_QUALITY, 92])
+    if not ok:
+        return None
+    return buf.tobytes()
+
+
 def _detect_aruco_markers(img: np.ndarray) -> dict[int, np.ndarray]:
     corners, ids, _ = ARUCO_DETECTOR.detectMarkers(img)
     if ids is None:

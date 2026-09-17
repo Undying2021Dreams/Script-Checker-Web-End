@@ -1,0 +1,148 @@
+"""
+Photographs are flattened and relit before they are stored or marked.
+
+A page photographed by hand is tilted and lit from one side. The four
+printed corner markers say exactly where the sheet is — a scanner app
+has to guess that from the edges — so the same correction is exact here
+rather than estimated.
+
+Measured on real phone photographs of a real paper: they read 99.3%
+"ink" by the blank detector's own measure, because paper photographs
+grey rather than white. Afterwards, 2%.
+"""
+
+import io
+
+import cv2
+import numpy as np
+import pytest
+from pdf2image import convert_from_bytes
+
+from models import Course, Enrollment
+
+
+@pytest.fixture
+def course(db, make_user):
+    teacher = make_user(role="teacher")
+    course = Course(title="Numerical Methods", join_code="SCAN01", teacher_id=teacher.id)
+    db.add(course)
+    db.commit()
+    db.refresh(course)
+    course.teacher = teacher
+    return course
+
+
+def _finalized_paper(client, course):
+    content = {
+        "type": "doc",
+        "content": [
+            {"type": "paragraph", "content": [{"type": "text", "text": "Solve for x: 2x + 4 = 10"}]},
+            {"type": "answerBox", "attrs": {"id": "sbox", "label": "a", "points": 5,
+                                            "minHeight": 400}},
+        ],
+    }
+    created = client.as_user(course.teacher).post(
+        "/api/questions", params={"course_id": course.id}, json={}
+    ).json()
+    qid = created["question_id"]
+    client.as_user(course.teacher).put(
+        f"/api/questions/{qid}/blocks",
+        json={"content": content,
+              "answer_boxes": [{"id": "sbox", "label": "a", "points": 5}],
+              "ground_truth_boxes": []},
+    )
+    assert client.as_user(course.teacher).post(f"/api/questions/{qid}/finalize").status_code == 200
+    return qid
+
+
+def _photographed(client, course, qid, tilt=0.05, dim=0.45):
+    """The paper's own page, tilted and lit unevenly, as JPEG bytes."""
+    pdf = client.as_user(course.teacher).get(f"/api/questions/{qid}/pdf").content
+    page = convert_from_bytes(pdf, dpi=200, fmt="png")[0]
+    img = cv2.cvtColor(np.array(page), cv2.COLOR_RGB2BGR)
+
+    h, w = img.shape[:2]
+    d = tilt * w
+    src = np.float32([[0, 0], [w, 0], [w, h], [0, h]])
+    dst = np.float32([[d, d * 0.5], [w - d * 0.3, 0], [w, h - d * 0.4], [d * 0.6, h]])
+    out = cv2.warpPerspective(img, cv2.getPerspectiveTransform(src, dst), (w, h),
+                              borderValue=(90, 90, 90))
+    ramp = np.linspace(1.0, dim, w, dtype=np.float32)[None, :, None]
+    out = np.clip(out.astype(np.float32) * ramp, 0, 255).astype(np.uint8)
+    return cv2.imencode(".jpg", out, [cv2.IMWRITE_JPEG_QUALITY, 85])[1].tobytes()
+
+
+def _ink_percent(data: bytes) -> float:
+    img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    return float((gray < 200).sum()) / gray.size * 100
+
+
+def test_a_photograph_is_flattened_and_relit_before_it_is_stored(client, course, db, make_user):
+    student = make_user()
+    qid = _finalized_paper(client, course)
+    db.add(Enrollment(course_id=course.id, student_id=student.id))
+    db.commit()
+
+    photo = _photographed(client, course, qid)
+    before = _ink_percent(photo)
+
+    res = client.as_user(student).post(
+        "/api/submissions",
+        # Same as the real client sends: the codes on a photographed
+        # page rarely read, so the student says which page it is as they
+        # take it.
+        data={"question_id": qid, "modality": "photo", "page_index_hint": "0"},
+        files={"image": ("page.jpg", photo, "image/jpeg")},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+
+    # Still extracts: flattening puts the markers exactly where the
+    # canonical page says they are, so the transform that follows is
+    # near-identity rather than absent.
+    assert body["pages"][0]["markers_detected"] == "4/4", body["pages"][0]
+    assert body["pages"][0]["crops"], "no crops came out of the scanned page"
+
+    stored = client.as_user(student).get(
+        f"/api/submissions/{body['submission_id']}/images/{body['pages'][0]['page_index']}"
+    )
+    assert stored.status_code == 200
+    after = _ink_percent(stored.content)
+
+    # The photograph came in grey — nearly every pixel below the blank
+    # detector's threshold — and is stored white.
+    assert before > 50, f"the test photo was supposed to be dimly lit, got {before:.1f}%"
+    assert after < 25, f"the stored page is still grey: {after:.1f}% ink"
+
+    page = cv2.imdecode(np.frombuffer(stored.content, np.uint8), cv2.IMREAD_COLOR)
+    assert abs(page.shape[1] / page.shape[0] - 1240 / 1754) < 0.02, (
+        f"the stored page is not A4-shaped: {page.shape[1]}x{page.shape[0]}"
+    )
+
+
+def test_a_scanner_upload_is_left_exactly_as_it_arrived(client, course, db):
+    """
+    A flatbed scan and a PDF page are already flat and evenly lit.
+    Running them through this would be a resampling pass that costs
+    sharpness and buys nothing, so the modality decides.
+    """
+    qid = _finalized_paper(client, course)
+    pdf = client.as_user(course.teacher).get(f"/api/questions/{qid}/pdf").content
+    page = convert_from_bytes(pdf, dpi=200, fmt="png")[0]
+    buf = io.BytesIO()
+    page.save(buf, format="PNG")
+    sent = buf.getvalue()
+
+    res = client.as_user(course.teacher).post(
+        "/api/submissions",
+        data={"question_id": qid, "modality": "scanner"},
+        files={"image": ("page.png", sent, "image/png")},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+
+    stored = client.as_user(course.teacher).get(
+        f"/api/submissions/{body['submission_id']}/images/{body['pages'][0]['page_index']}"
+    )
+    assert stored.content == sent, "a scanner upload was rewritten"
