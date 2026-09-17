@@ -5,8 +5,81 @@ import { toast } from 'sonner'
 import { EmptyState, Pending, Skeleton, Spinner, StatusPill } from '@/components/ui/feedback'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useGradeAll, useReleaseAll, useSubmissions, useUploadSubmission } from '@/lib/queries'
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
+import {
+  useDeleteSubmission,
+  useGradeAll,
+  useReleaseAll,
+  useSubmissions,
+  useUploadSubmission,
+} from '@/lib/queries'
 import type { SubmissionSummary } from '@/lib/types'
+
+
+/**
+ * Throw one script away.
+ *
+ * Asks first, and names what goes, because there is no undo: the marks
+ * and the extracted crops are cascaded off the submission row.
+ */
+function DiscardScript({
+  questionId,
+  submission,
+}: {
+  questionId: string
+  submission: SubmissionSummary
+}) {
+  const remove = useDeleteSubmission(questionId)
+  const who = submission.student_name ?? 'this script'
+
+  return (
+    <Dialog>
+      <DialogTrigger
+        render={
+          <Button variant="ghost" size="sm" className="text-destructive">
+            Discard
+          </Button>
+        }
+      />
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Discard {who}'s script?</DialogTitle>
+          <DialogDescription>
+            The pages, the extracted answers and any marks go with it, and this cannot be
+            undone. {submission.student_name ? 'They' : 'Whoever sent it'} would have to submit
+            again.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <DialogClose render={<Button variant="ghost">Keep it</Button>} />
+          <Button
+            variant="destructive"
+            disabled={remove.isPending}
+            onClick={async () => {
+              try {
+                await remove.mutateAsync(submission.id)
+                toast.success('Script discarded')
+              } catch (err) {
+                toast.error((err as Error).message)
+              }
+            }}
+          >
+            {remove.isPending ? <Pending>Discarding…</Pending> : 'Discard'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
 
 function StatusBadge({ submission }: { submission: SubmissionSummary }) {
   const { grading_status, released, needs_review_count } = submission
@@ -226,26 +299,35 @@ export function SubmissionsCard({ questionId }: { questionId: string }) {
         )}
 
         {submissions?.map((s) => (
-          <button
+          <div
             key={s.id}
-            onClick={() => navigate(`/submissions/${s.id}`)}
-            className="flex w-full items-center justify-between gap-3 rounded-md border px-3 py-2 text-left text-sm hover:bg-muted"
+            className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm"
           >
-            <span className="flex items-center gap-2">
-              <span>{s.student_name ?? 'Uploaded by teacher'}</span>
-              <span className="text-xs text-muted-foreground">
-                {new Date(s.created_at).toLocaleString()}
-              </span>
-            </span>
-            <span className="flex items-center gap-2">
-              {s.earned != null && s.max_score != null && (
-                <span className="text-muted-foreground">
-                  {s.earned} / {s.max_score}
+            <button
+              onClick={() => navigate(`/submissions/${s.id}`)}
+              className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-2 text-left hover:underline"
+            >
+              <span className="flex items-center gap-2">
+                <span>{s.student_name ?? 'Uploaded by teacher'}</span>
+                <span className="text-xs text-muted-foreground">
+                  {new Date(s.created_at).toLocaleString()}
                 </span>
-              )}
-              <StatusBadge submission={s} />
-            </span>
-          </button>
+              </span>
+              <span className="flex items-center gap-2">
+                {s.earned != null && s.max_score != null && (
+                  <span className="text-muted-foreground">
+                    {s.earned} / {s.max_score}
+                  </span>
+                )}
+                <StatusBadge submission={s} />
+              </span>
+            </button>
+
+            {/* The teacher's, not the student's: discarding a handed-in
+                script is a marking decision, and a student who could do
+                it would be able to unsubmit after seeing a mark. */}
+            <DiscardScript questionId={questionId} submission={s} />
+          </div>
         ))}
       </CardContent>
     </Card>
