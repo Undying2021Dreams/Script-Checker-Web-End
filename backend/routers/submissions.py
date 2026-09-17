@@ -282,6 +282,14 @@ async def create_submission(
     # uploading their second page silently overwrote their first, and
     # nothing said so.
     page_index: int | None = Form(None),
+    # What the student said when the photograph was taken, before anyone
+    # knew whether the codes would read. A hint, not an instruction: a
+    # code read off the sheet is better evidence than a number typed
+    # from memory, so identification still wins where it succeeds. Its
+    # purpose is to save the round trip that used to happen — upload,
+    # fail, be asked, upload again — on a phone where the codes rarely
+    # survive the photograph.
+    page_index_hint: int | None = Form(None),
     image: UploadFile = File(...),
     submission_id: str | None = Form(None),
     user: User = Depends(get_current_user), db: Session = Depends(get_db),
@@ -461,7 +469,14 @@ async def create_submission(
             # "undetermined" means this server cannot read codes at all,
             # which is not the student's problem: fall through to the
             # arrival-order behaviour rather than refusing their work.
-            if identity["verdict"] == "unreadable" and explicit_page_index is None:
+            if identity["verdict"] == "ok" and explicit_page_index is None:
+                page_index = identity["page_index"]
+            elif explicit_page_index is None and page_index_hint is not None:
+                # Codes unreadable or unreadable-by-this-server, but the
+                # student already told us. Better than arrival order,
+                # which is what this fell back to.
+                page_index = page_index_hint
+            elif identity["verdict"] == "unreadable" and explicit_page_index is None:
                 raise HTTPException(
                     status_code=422,
                     detail=(
@@ -469,8 +484,6 @@ async def create_submission(
                         "it is if the codes are damaged."
                     ),
                 )
-            if identity["verdict"] == "ok" and explicit_page_index is None:
-                page_index = identity["page_index"]
 
         try:
             result = extract_page(

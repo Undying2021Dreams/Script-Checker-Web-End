@@ -314,6 +314,7 @@ export function useUploadSubmission(questionId: string) {
       modality,
       submissionId,
       pageIndex,
+      pageIndexHint,
     }: {
       file: File
       modality: string
@@ -323,6 +324,10 @@ export function useUploadSubmission(questionId: string) {
       // override what the page says about itself — and replace that
       // page rather than adding one.
       pageIndex?: number
+      // What the student said as they took the photograph. The server
+      // uses it only if the codes cannot be read, so it costs nothing
+      // when they can and saves a round trip when they cannot.
+      pageIndexHint?: number
     }) => {
       const form = new FormData()
       form.append('question_id', questionId)
@@ -330,6 +335,7 @@ export function useUploadSubmission(questionId: string) {
       form.append('image', file)
       if (submissionId) form.append('submission_id', submissionId)
       if (pageIndex !== undefined) form.append('page_index', String(pageIndex))
+      if (pageIndexHint !== undefined) form.append('page_index_hint', String(pageIndexHint))
       return apiFetch<{ submission_id: string; pages: unknown[] }>('/submissions', {
         method: 'POST',
         body: form,
