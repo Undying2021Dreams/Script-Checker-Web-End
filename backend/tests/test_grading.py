@@ -244,7 +244,38 @@ async def test_prompt_says_which_images_are_the_model_answer():
     # Model answer first, student's work after — and said so explicitly,
     # or the model could mark the answer key against itself.
     assert call["images"] == [(b"GT", "image/png"), (b"S1", "image/png"), (b"S2", "image/png")]
-    assert "first 1 image(s) are the official model answer" in call["user"]
+    assert "first 1 image(s) are the official MODEL ANSWER" in call["user"]
+    assert "remaining 2 image(s) are the STUDENT'S" in call["user"]
+
+
+@pytest.mark.asyncio
+async def test_a_question_figure_is_sent_and_named():
+    """
+    A question built around a diagram was marked without the diagram:
+    only the model answer's images were ever collected. The model was
+    left judging working against a figure it had never seen.
+
+    Three kinds of image now arrive in one list, so the message has to
+    say which is which — confusing them means marking the answer key as
+    though the student had written it.
+    """
+    provider = FakeProvider(["SCORE: 1\nFEEDBACK: ok"])
+    item = AnswerToGrade(
+        answer_box_id="a1", label="", max_score=5,
+        question_text="Find angle x in the figure", ground_truth_text="40",
+        question_images=[(b"FIG", "image/png")],
+        ground_truth_images=[(b"GT", "image/png")],
+        crops=[(b"S1", "image/png")],
+    )
+    await grade_one(provider, item)
+    call = provider.calls[0]
+
+    assert call["images"] == [
+        (b"FIG", "image/png"), (b"GT", "image/png"), (b"S1", "image/png"),
+    ]
+    assert "first 1 image(s) are figures belonging to the QUESTION" in call["user"]
+    assert "next 1 image(s) are the official MODEL ANSWER" in call["user"]
+    assert "remaining 1 image(s) are the STUDENT'S" in call["user"]
 
 
 # ── End to end through the API ──────────────────────────────────────

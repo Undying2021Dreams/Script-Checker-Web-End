@@ -134,6 +134,10 @@ class AnswerToGrade:
     max_score: int
     question_text: str
     ground_truth_text: str
+    # Figures the question itself depends on. Without these a question
+    # built around a diagram is marked without the diagram, and the model
+    # has to guess at what the student was looking at.
+    question_images: list[tuple[bytes, str]] = field(default_factory=list)
     ground_truth_images: list[tuple[bytes, str]] = field(default_factory=list)
     crops: list[tuple[bytes, str]] = field(default_factory=list)
     # Set when this can't be marked automatically; grading records it for
@@ -263,9 +267,9 @@ def marking_scheme_total(text: str | None) -> int | None:
     return int(value)
 
 
-def question_text_by_ground_truth_box(content_doc: dict | None) -> dict[str, str]:
-    """Sub-question text preceding each groundTruthBox, as plain text."""
-    result: dict[str, str] = {}
+def question_nodes_by_ground_truth_box(content_doc: dict | None) -> dict[str, list]:
+    """The sub-question nodes preceding each groundTruthBox."""
+    result: dict[str, list] = {}
     if not isinstance(content_doc, dict):
         return result
 
@@ -275,7 +279,7 @@ def question_text_by_ground_truth_box(content_doc: dict | None) -> dict[str, str
         if node_type == "groundTruthBox":
             gt_id = (node.get("attrs") or {}).get("id")
             if gt_id:
-                result[gt_id] = extract_plain_text(buffer)
+                result[gt_id] = buffer
             buffer = []
             continue
         if node_type == "answerBox":
@@ -283,6 +287,14 @@ def question_text_by_ground_truth_box(content_doc: dict | None) -> dict[str, str
         buffer.append(node)
 
     return result
+
+
+def question_text_by_ground_truth_box(content_doc: dict | None) -> dict[str, str]:
+    """Sub-question text preceding each groundTruthBox, as plain text."""
+    return {
+        gt_id: extract_plain_text(nodes)
+        for gt_id, nodes in question_nodes_by_ground_truth_box(content_doc).items()
+    }
 
 
 _SCORE_RE = re.compile(r"SCORE:\s*(.+)", re.IGNORECASE)
@@ -357,16 +369,28 @@ def build_user_message(item: AnswerToGrade) -> str:
     # Both the model answer and the student's work can arrive as images in
     # the same list, so the message has to say which is which — otherwise
     # the model can mark the answer key against itself.
+    # Three kinds of image can arrive in one flat list, and confusing
+    # them is the most damaging mistake available here — marking the
+    # model answer as though the student had written it. So the message
+    # says exactly what is where, in the order they are attached.
+    n_q = len(item.question_images)
     n_gt = len(item.ground_truth_images)
     n_crops = len(item.crops)
+
+    described = []
+    if n_q:
+        described.append(f"the first {n_q} image(s) are figures belonging to the QUESTION")
     if n_gt:
-        parts.append(
-            f"\nIMAGES: the first {n_gt} image(s) are the official model answer. "
-            f"The remaining {n_crops} image(s) are the student's handwritten answer, "
-            f"in order."
+        described.append(
+            f"the next {n_gt} image(s) are the official MODEL ANSWER"
+            if n_q else f"the first {n_gt} image(s) are the official MODEL ANSWER"
         )
-    else:
-        parts.append(f"\nIMAGES: {n_crops} image(s) of the student's handwritten answer, in order.")
+    described.append(
+        f"the remaining {n_crops} image(s) are the STUDENT'S handwritten answer, in order"
+        if described else
+        f"{n_crops} image(s) of the STUDENT'S handwritten answer, in order"
+    )
+    parts.append("\nIMAGES: " + "; ".join(described) + ".")
 
     return "\n".join(parts)
 
@@ -412,7 +436,8 @@ async def grade_one(provider: LLMProvider, item: AnswerToGrade) -> dict:
             build_user_message(item),
             # Model answer first, student's work after — build_user_message
             # tells the model that's the order.
-            item.ground_truth_images + item.crops,
+            # Same order the message above describes.
+            item.question_images + item.ground_truth_images + item.crops,
         )
     except Exception as exc:  # noqa: BLE001 — surfaced on the row, not raised
         logger.exception("Grading call failed for box %s", item.answer_box_id)
