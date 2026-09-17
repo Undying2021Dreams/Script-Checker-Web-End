@@ -23,7 +23,7 @@ from schemas import (
     GroupedAnswerBoxOut,
     AnswerPartOut,
 )
-from services.extractor import assess_image, extract_page, identify_page
+from services.extractor import assess_image, extract_page, identify_page, scan_photograph
 from routers.questions import _question_to_dict
 from ratelimit import HEAVY_CPU_LIMIT, limiter
 from security import get_current_user
@@ -484,6 +484,29 @@ async def create_submission(
                         "it is if the codes are damaged."
                     ),
                 )
+
+        # Turned into something closer to a scan, once it is known which
+        # page it is and that the photograph is worth keeping.
+        #
+        # Both of those judgements are made on the original above, and
+        # deliberately: the quality gate measures whether a photograph
+        # was taken well, and relighting a dark one would let it pass by
+        # hiding the very thing being judged.
+        #
+        # Photos only. A PDF or a flatbed scan is already flat and
+        # evenly lit, so this would be a resampling pass that costs
+        # sharpness and buys nothing.
+        if modality == "photo":
+            scanned = scan_photograph(
+                raw_bytes,
+                question_dict.get("page_w_px") or 1240,
+                question_dict.get("page_h_px") or 1754,
+            )
+            if scanned is not None:
+                # Stored as well as graded, so what a student sees of
+                # their own script is what the marking actually saw.
+                raw_bytes = scanned
+                content_type = "image/jpeg"
 
         try:
             result = extract_page(
