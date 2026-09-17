@@ -108,6 +108,14 @@ class Question(Base):
     page_h_px = Column(Integer, nullable=True)
     page_count = Column(Integer, nullable=True)
 
+    # Optional: what the teacher says the whole paper is out of.
+    #
+    # Not the source of the marks — the parts are — but a check against
+    # the one mistake per-part marks cannot catch on their own: a part
+    # left out altogether. Each part can be right and the paper still be
+    # wrong.
+    total_marks_declared = Column(Integer, nullable=True)
+
     derived_from = Column(String, ForeignKey("questions.id"), nullable=True)
     created_at = Column(DateTime, default=_utcnow, nullable=False)
     finalized_at = Column(DateTime, nullable=True)

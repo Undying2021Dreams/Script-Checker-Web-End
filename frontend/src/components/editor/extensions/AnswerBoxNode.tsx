@@ -79,19 +79,45 @@ function AnswerBoxView({ node, updateAttributes, editor }: NodeViewProps) {
           </span>
         )}
 
-        <span style={{ fontSize: 11, color: '#888', display: 'flex', alignItems: 'center', gap: 4 }}>
-          points:
+        {/* Marks are required, and shown as missing until set.
+            They used to be read out of the marking scheme at finalize,
+            which got real schemes wrong in ways nobody saw until a mark
+            had been given — a wrong total looks exactly like a right
+            one. The teacher states it; the scheme only suggests. */}
+        <span
+          style={{
+            fontSize: 11,
+            color: points == null ? '#b42318' : '#888',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+          }}
+        >
+          marks:
           {canEdit ? (
             <input
               type="number"
               min={0}
-              value={points}
-              onChange={(e) => updateAttributes({ points: Number(e.target.value) || 0 })}
-              style={{ width: 44, fontSize: 11, border: '1px solid #ddd', borderRadius: 4, padding: '1px 4px' }}
+              value={points ?? ''}
+              placeholder="—"
+              onChange={(e) => {
+                const raw = e.target.value.trim()
+                // Empty means "not decided yet", which is a different
+                // thing from a part worth nothing.
+                updateAttributes({ points: raw === '' ? null : Number(raw) })
+              }}
+              style={{
+                width: 48,
+                fontSize: 11,
+                border: `1px solid ${points == null ? '#f0a5a0' : '#ddd'}`,
+                borderRadius: 4,
+                padding: '1px 4px',
+              }}
             />
           ) : (
-            <strong>{points}</strong>
+            <strong>{points ?? '—'}</strong>
           )}
+          {points == null && <span>required</span>}
         </span>
 
         {canEdit && (
@@ -183,7 +209,10 @@ export const AnswerBoxNode = Node.create({
     return {
       id: { default: null },
       label: { default: '' },
-      points: { default: 1 },
+      // Null, not 1. A new box has no marks until the teacher says
+      // what it is worth — defaulting to one is how a ten-mark scheme
+      // came to be marked out of one.
+      points: { default: null },
       widthPercent: { default: 100 }, // 25 | 50 | 75 | 100
       minHeight: { default: 90 },
     }
@@ -208,7 +237,7 @@ export const AnswerBoxNode = Node.create({
         ({ commands }) =>
           commands.insertContent({
             type: this.name,
-            attrs: { id: uuid(), label, points: 1 },
+            attrs: { id: uuid(), label, points: null },
           }),
     }
   },

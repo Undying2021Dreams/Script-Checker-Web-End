@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { AnswerKeyPreview } from '@/components/AnswerKeyPreview'
+import { MarksPanel } from '@/components/MarksPanel'
 import { AnswerKeyCheck, RubricSuggestions } from '@/components/AuthoringHelpers'
 import { SubmissionsCard } from '@/components/SubmissionsCard'
 import QuestionEditor from '@/components/editor/QuestionEditor'
@@ -304,20 +305,13 @@ export function QuestionEditorPage() {
         </p>
       )}
 
-      {/* Said plainly rather than filled in with a guess. A box silently
-          standing at one mark while the scheme beside it was worth ten is
-          exactly how a correct answer came back as 0.5. */}
-      {partsWithoutMarks.length > 0 && (
-        <p className="text-sm text-destructive">
-          {partsWithoutMarks.length} part(s) have no marks yet
-          {partsWithoutMarks.some((b) => b.label)
-            ? ` (${partsWithoutMarks.map((b) => b.label).filter(Boolean).join(', ')})`
-            : ''}
-          . Write the marks into the model answer — "5 marks for the method, 5 marks for the
-          answer" — and they will be picked up
-          {isFinalized ? ' when you re-finalize a copy' : ' when you finalize'}. Grading skips a
-          part whose worth is undecided rather than marking it out of a guess.
-        </p>
+      {!isFinalized && (
+        <MarksPanel
+          questionId={questionId}
+          question={question}
+          totalPoints={totalPoints}
+          partsWithoutMarks={partsWithoutMarks}
+        />
       )}
 
       {/* Authoring aids belong while the paper can still change; once

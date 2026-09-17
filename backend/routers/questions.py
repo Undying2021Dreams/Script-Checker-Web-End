@@ -95,6 +95,7 @@ def _question_to_out(q: Question, db: Session | None = None) -> QuestionOut:
         page_h_px=q.page_h_px,
         page_count=q.page_count,
         derived_from=q.derived_from,
+        total_marks_declared=q.total_marks_declared,
         created_at=q.created_at.isoformat() if q.created_at else "",
         finalized_at=q.finalized_at.isoformat() if q.finalized_at else None,
     )
@@ -189,6 +190,39 @@ def _assert_draft(q: Question):
             status_code=409,
             detail=f"Question {q.id} is finalized — cannot modify. Clone it to create a new draft.",
         )
+
+
+@router.get("/{question_id}/suggested-marks")
+def suggested_marks(
+    question_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    What each part looks like it is worth, according to its marking
+    scheme.
+
+    A suggestion and nothing more. This used to be applied silently at
+    finalize, and got three real schemes wrong in ways nobody saw until
+    a mark had been given — a wrong total does not look wrong, it looks
+    like a number. Shown to the teacher instead, who can accept it or
+    correct it while the paper is still a draft.
+    """
+    q = _get_question_or_404(question_id, db, user)
+
+    pairing = pair_answer_boxes_with_ground_truth(q.content)
+    gt_text = {b.id: _extract_plain_text(b.content or {}) for b in q.ground_truth_boxes}
+
+    out = []
+    for box in sorted(q.answer_boxes, key=lambda b: b.order_index):
+        scheme = "\n".join(gt_text.get(gt_id, "") for gt_id in pairing.get(box.id, []))
+        out.append({
+            "answer_box_id": box.id,
+            "label": box.label or "",
+            "points": box.points,
+            "suggested": marking_scheme_total(scheme),
+        })
+    return out
 
 
 @router.patch("/{question_id}/answer-boxes/{box_id}")
@@ -406,8 +440,11 @@ def update_question_meta(
     finalized paper changes nothing a student has already been given.
     """
     q = _get_question_or_404(question_id, db, user)
-    title = (body.title or "").strip()
-    q.title = title or None
+    if body.title is not None:
+        title = body.title.strip()
+        q.title = title or None
+    if "total_marks_declared" in body.model_fields_set:
+        q.total_marks_declared = body.total_marks_declared
     db.commit()
     db.refresh(q)
     return _question_to_out(q, db=db)
@@ -864,31 +901,45 @@ def finalize_question(request: Request, question_id: str, user: User = Depends(g
         except Exception as e:
             logger.warning("Failed to render ground truth box %s: %s", gt_box.id, e)
 
-    # What each part is worth, taken from the marking scheme the teacher
-    # already wrote into its model answer.
+    # What each part is worth is the teacher's to state, not ours to
+    # infer.
     #
-    # Asking for it again in a separate field asks the same question
-    # twice, and the two answers drift: boxes default to one mark, so a
-    # scheme worth ten was being marked out of one, and a correct answer
-    # came back as 0.5. The scheme is the teacher's own statement of what
-    # the part is worth, so it decides. Where it states no marks at all
-    # the existing value stands, and either way the teacher can change it
-    # afterwards from the review screen.
-    pairing = pair_answer_boxes_with_ground_truth(q.content)
-    gt_text = {
-        b.id: _extract_plain_text(b.content or {}) for b in q.ground_truth_boxes
-    }
-    for box in q.answer_boxes:
-        scheme = "\n".join(
-            gt_text.get(gt_id, "") for gt_id in pairing.get(box.id, [])
+    # This used to be read out of the marking scheme at finalize. Three
+    # rounds of fixes followed, each found in production after a wrong
+    # total had already been used: alternatives summed as extra criteria,
+    # "Max marks - 13" read as 30, "2+1+10 = 13 marks" read as 2. Every
+    # fix was right and the next real scheme broke the next assumption.
+    #
+    # The failures were silent, which is what settles it. A wrong total
+    # does not look wrong — it looks like a number, and it decides a
+    # grade. So the scheme now only suggests, in the editor, where the
+    # teacher can see the suggestion and correct it before anyone is
+    # marked.
+    unset = [b for b in q.answer_boxes if b.points is None]
+    if unset:
+        named = ", ".join(b.label or f"part {b.order_index + 1}" for b in unset)
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"These parts have no marks yet: {named}. Set what each is worth "
+                "before finalizing — the editor can suggest values from your "
+                "marking schemes."
+            ),
         )
-        total = marking_scheme_total(scheme)
-        if total is not None and total != box.points:
-            logger.info(
-                "Answer box %s set to %s marks from its marking scheme (was %s)",
-                box.id, total, box.points,
+
+    # An optional cross-check: the one error per-part marks cannot catch
+    # on their own is a part left out altogether. Each part can be right
+    # and the paper still be wrong.
+    if q.total_marks_declared is not None:
+        actual = sum(b.points or 0 for b in q.answer_boxes)
+        if actual != q.total_marks_declared:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"The parts add up to {actual}, but this paper says it is out "
+                    f"of {q.total_marks_declared}. Fix one of them before finalizing."
+                ),
             )
-            box.points = total
 
     q.state = "finalized"
     q.finalized_at = datetime.now(timezone.utc)
