@@ -3,15 +3,20 @@ import type { ReactNode } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Pending } from '@/components/ui/feedback'
 import { Separator } from '@/components/ui/separator'
 
 interface Props {
   editor: Editor | null
   isFinalized: boolean
   onInsertImage: () => void
+  // An image takes seconds to upload and be re-rendered into the paper.
+  // Without this the button looked untouched the whole time, which is
+  // indistinguishable from nothing having happened.
+  insertingImage?: boolean
 }
 
-export function EditorToolbar({ editor, isFinalized, onInsertImage }: Props) {
+export function EditorToolbar({ editor, isFinalized, onInsertImage, insertingImage }: Props) {
   if (!editor) return null
 
   const Btn = ({
@@ -19,11 +24,13 @@ export function EditorToolbar({ editor, isFinalized, onInsertImage }: Props) {
     active,
     title,
     children,
+    disabled,
   }: {
     onClick: () => void
     active?: boolean
     title: string
     children: ReactNode
+    disabled?: boolean
   }) => (
     <Button
       type="button"
@@ -33,7 +40,7 @@ export function EditorToolbar({ editor, isFinalized, onInsertImage }: Props) {
       // nothing once focus moves to the button.
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
-      disabled={isFinalized}
+      disabled={isFinalized || disabled}
       title={title}
     >
       {children}
@@ -96,8 +103,12 @@ export function EditorToolbar({ editor, isFinalized, onInsertImage }: Props) {
       <Btn onClick={() => editor.chain().focus().insertEquation(true).run()} title="Insert centred equation">
         ∑ Block
       </Btn>
-      <Btn onClick={onInsertImage} title="Upload image">
-        Image
+      <Btn
+        onClick={onInsertImage}
+        title="Upload image"
+        disabled={insertingImage}
+      >
+        {insertingImage ? <Pending>Adding…</Pending> : 'Image'}
       </Btn>
       <Btn onClick={() => editor.chain().focus().insertAnswerBox('').run()} title="Insert answer box for students">
         ☐ Answer box

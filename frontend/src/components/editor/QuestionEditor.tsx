@@ -2,7 +2,9 @@ import Placeholder from '@tiptap/extension-placeholder'
 import { EditorContent, useEditor } from '@tiptap/react'
 import type { Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
+
+import { toast } from 'sonner'
 
 import EditorToolbar from './EditorToolbar'
 import './editor.css'
@@ -132,6 +134,8 @@ export const QuestionEditor = forwardRef<QuestionEditorHandle, Props>(function Q
     [editor],
   )
 
+  const [insertingImage, setInsertingImage] = useState(false)
+
   const handleInsertImage = useCallback(() => {
     if (!editor || isFinalized) return
     const input = document.createElement('input')
@@ -140,6 +144,7 @@ export const QuestionEditor = forwardRef<QuestionEditorHandle, Props>(function Q
     input.onchange = async () => {
       const file = input.files?.[0]
       if (!file) return
+      setInsertingImage(true)
       try {
         // Falls back to a local blob URL so the editor still works if no
         // upload handler was supplied.
@@ -148,7 +153,11 @@ export const QuestionEditor = forwardRef<QuestionEditorHandle, Props>(function Q
           : URL.createObjectURL(file)
         editor.chain().focus().setImage({ src: url, alt: file.name }).run()
       } catch (err) {
-        console.error('Image upload failed:', err)
+        // Was only logged to the console, so a failed upload and a slow
+        // one looked identical: nothing appeared either way.
+        toast.error(`Could not add that image: ${(err as Error).message}`)
+      } finally {
+        setInsertingImage(false)
       }
     }
     input.click()
@@ -158,7 +167,12 @@ export const QuestionEditor = forwardRef<QuestionEditorHandle, Props>(function Q
 
   return (
     <div className="overflow-hidden rounded-lg border">
-      <EditorToolbar editor={editor} isFinalized={!!isFinalized} onInsertImage={handleInsertImage} />
+      <EditorToolbar
+        editor={editor}
+        isFinalized={!!isFinalized}
+        onInsertImage={handleInsertImage}
+        insertingImage={insertingImage}
+      />
       {/* Same mat as everywhere else paper appears, so the sheet being
           authored reads as the same kind of object as the scan it will
           be marked against. */}
