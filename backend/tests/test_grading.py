@@ -820,6 +820,37 @@ def test_model_answer_is_withheld_until_marks_are_released(client, graded_setup,
     # Two figures introduced the same way, so neither is the whole.
     ("Step A is worth 5 marks, step B is worth 5 marks", 10),
     ("Worth 4 marks.", 4),
+    # More real schemes. Between them they cover the ways a teacher
+    # states a maximum: before the word ("Maximum 12 marks"), after it
+    # ("Max marks - 13"), with a colon, and as the result of a sum.
+    (
+        "Marking schema:\n"
+        "For dividing the numerator and denominator by - 4 marks\n"
+        "For stating the limit for sinx and cosx for infinity - 2 marks\n"
+        "For finding the correct final answer - 7 marks\n"
+        "Max total marks-10",
+        10,
+    ),
+    # The teacher shows their working, so the total is what the sum comes
+    # to and not its first term. Reading the first number gives 2 for a
+    # question worth 13.
+    (
+        "Marking schema :\n"
+        "for a) correct formula writing - 2 mark\n"
+        "for b) correct reaction name - 1 mark\n"
+        "for c)\n"
+        "intermideate equations and sense making - 3 marks\n"
+        "correct answer - 7 mark\n"
+        "Max obtainable marks - 2+1+10 = 13 marks.",
+        13,
+    ),
+    (
+        "Marking schema :\n"
+        "For putting the right equation along with the u,v,s : 3 marks\n"
+        "For getting the right value with sign - 4 marks\n"
+        "Max obtainable marks : 6 .",
+        6,
+    ),
     ("0.5 marks for each of the two steps: 0.5 marks, 0.5 marks", None),
     ("x = 3", None),
     ("", None),
