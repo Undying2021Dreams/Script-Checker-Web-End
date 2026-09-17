@@ -6,7 +6,7 @@ import { AnswerKeyPreview } from '@/components/AnswerKeyPreview'
 import { MarksPanel } from '@/components/MarksPanel'
 import { AnswerKeyCheck, RubricSuggestions } from '@/components/AuthoringHelpers'
 import { SubmissionsCard } from '@/components/SubmissionsCard'
-import QuestionEditor from '@/components/editor/QuestionEditor'
+import QuestionEditor, { type QuestionEditorHandle } from '@/components/editor/QuestionEditor'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CardSkeleton, Pending, Skeleton } from '@/components/ui/feedback'
@@ -121,6 +121,7 @@ export function QuestionEditorPage() {
 
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const latest = useRef<QuestionDocPayload | null>(null)
+  const editorRef = useRef<QuestionEditorHandle>(null)
 
   const isFinalized = question?.state === 'finalized'
 
@@ -311,6 +312,7 @@ export function QuestionEditorPage() {
           question={question}
           totalPoints={totalPoints}
           partsWithoutMarks={partsWithoutMarks}
+          onApplyPoints={(pointsById) => editorRef.current?.applyAnswerBoxPoints(pointsById)}
         />
       )}
 
@@ -332,6 +334,7 @@ export function QuestionEditorPage() {
       {isFinalized && <SubmissionsCard questionId={questionId} />}
 
       <QuestionEditor
+        ref={editorRef}
         question={question}
         onDocChange={handleDocChange}
         onUploadImage={handleUploadImage}

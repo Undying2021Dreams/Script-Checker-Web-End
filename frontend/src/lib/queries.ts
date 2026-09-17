@@ -113,12 +113,31 @@ export function useCreateQuestion(courseId: string) {
 }
 
 export function useSaveQuestion(questionId: string) {
+  const qc = useQueryClient()
   return useMutation({
     mutationFn: (payload: QuestionDocPayload) =>
       apiFetch<Question>(`/questions/${questionId}/blocks`, {
         method: 'PUT',
         body: JSON.stringify(payload),
       }),
+    // The saved answer boxes are what the marks summary counts, and it
+    // used to keep showing whatever they were worth when the page was
+    // opened — a paper edited to 42 still read "3 marks" until reload.
+    //
+    // Written into the cache rather than refetched, so the document the
+    // teacher is typing into is never replaced underneath them.
+    onSuccess: (saved) => {
+      qc.setQueryData<Question>(['question', questionId], (prev) =>
+        prev
+          ? {
+              ...prev,
+              answer_boxes: saved.answer_boxes,
+              ground_truth_boxes: saved.ground_truth_boxes,
+            }
+          : saved,
+      )
+      qc.invalidateQueries({ queryKey: ['suggested-marks', questionId] })
+    },
   })
 }
 
