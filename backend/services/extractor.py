@@ -17,6 +17,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+from functools import lru_cache
 import uuid
 
 import cv2
@@ -341,6 +342,243 @@ def get_page_segments(question: dict, page_index: int) -> list[tuple[dict, int, 
         elif box.get("page_index") == page_index and box.get("bbox"):
             page_segments.append((box, 0, box["bbox"]))
     return page_segments
+
+
+# How sharp a photograph has to be before it is worth extracting.
+#
+# Variance of the Laplacian: high on crisp edges, near zero on a blurred
+# image. The absolute number depends on resolution and content, so this
+# is deliberately generous — it is here to catch the obviously unusable
+# (camera shake, a photograph of a photograph), not to grade quality.
+# The real test of a page is whether its codes decode, which is a fact
+# rather than a threshold.
+BLUR_VARIANCE_FLOOR = 40.0
+
+
+def assess_image(image_bytes: bytes) -> dict:
+    """
+    Whether a photograph is worth putting through extraction.
+
+    Judges the image; never alters it. A scanner-style pass that
+    flattened contrast would risk the faint-pencil case the blank
+    detector is calibrated around — a genuinely blank crop reads 0.0000%
+    ink and the faintest real answer 0.21%, and crushing the range moves
+    both unpredictably. So a bad photograph is refused and retaken, not
+    improved.
+
+    Returns {ok, reason, blur, brightness}.
+    """
+    try:
+        img, _ = _decode_image(image_bytes)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "reason": f"The image could not be opened ({exc}).",
+                "blur": None, "brightness": None}
+
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    blur = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    brightness = float(gray.mean())
+
+    if blur < BLUR_VARIANCE_FLOOR:
+        return {
+            "ok": False,
+            "reason": "This photo looks blurred. Hold the phone steady and take it again.",
+            "blur": blur, "brightness": brightness,
+        }
+
+    # Only darkness is checked, and only the extreme of it.
+    #
+    # There is deliberately no upper bound. An exam page is mostly white
+    # paper, so a clean scan reads well above 240 and a first attempt at
+    # a "washed out" check rejected a perfectly good rendered page. The
+    # useful question is not how bright the image is but whether its
+    # codes can be read, which the next step answers with a fact instead
+    # of a threshold.
+    if brightness < 40:
+        return {
+            "ok": False,
+            "reason": "This photo is too dark to read. Try again in better light.",
+            "blur": blur, "brightness": brightness,
+        }
+
+    return {"ok": True, "reason": None, "blur": blur, "brightness": brightness}
+
+
+def page_of_box(question: dict, answer_box_id: str, part: int = 0) -> int | None:
+    """Which physical page a given answer box (or part of one) is printed on."""
+    for box in question.get("answer_boxes", []):
+        if box.get("id") != answer_box_id:
+            continue
+        segs = box.get("segments") or []
+        if segs:
+            if 0 <= part < len(segs):
+                return segs[part][0]
+            return None
+        return box.get("page_index", 0)
+    return None
+
+
+@lru_cache(maxsize=1)
+def _zbar_available() -> bool:
+    """
+    Whether the zbar library can actually be loaded.
+
+    Page identification leans on it: OpenCV's own detector cannot read
+    the small per-box codes on a full page — measured on a real rendered
+    sheet, zbar read them and OpenCV found nothing, whole-image or
+    tiled. The container installs libzbar0 for exactly this reason.
+
+    Checked explicitly so a missing library degrades instead of being
+    reported as every student's photograph being unreadable.
+    """
+    try:
+        from pyzbar.pyzbar import decode  # noqa: F401
+        import numpy as _np
+
+        decode(_np.zeros((8, 8), dtype=_np.uint8))
+        return True
+    except Exception:  # noqa: BLE001
+        logger.error(
+            "zbar is unavailable, so pages cannot identify themselves from their "
+            "printed codes. Uploads will fall back to the order they arrive in. "
+            "Install libzbar0."
+        )
+        return False
+
+
+def _decode_all_qrs(img: np.ndarray) -> list[dict]:
+    """
+    Every QR payload readable anywhere in the image.
+
+    Unlike _detect_qr, which looks in one small region for one expected
+    code, this sweeps the whole photograph and takes whatever it finds —
+    the point being to learn what the page is before assuming anything
+    about it.
+    """
+    payloads: list[dict] = []
+    seen: set[str] = set()
+
+    def keep(data: str) -> None:
+        if not data or data in seen:
+            return
+        seen.add(data)
+        parsed = _parse_qr_payload(data)
+        if parsed:
+            payloads.append(parsed)
+
+    # zbar first here, the reverse of _detect_qr's order: it reliably
+    # returns *every* symbol in a frame, while OpenCV's multi-detector is
+    # noticeably weaker on the small, angled codes a handheld photo
+    # produces — and finding them all is the whole point.
+    try:
+        from pyzbar.pyzbar import decode as pyzbar_decode
+
+        for r in pyzbar_decode(img):
+            keep(r.data.decode("utf-8", "ignore"))
+    except Exception:  # noqa: BLE001 — zbar missing or unhappy; cv2 still tried
+        logger.debug("pyzbar unavailable for whole-page QR sweep", exc_info=True)
+
+    if not payloads:
+        try:
+            ok, decoded, _, _ = cv2.QRCodeDetector().detectAndDecodeMulti(img)
+            if ok:
+                for data in decoded:
+                    keep(data)
+        except Exception:  # noqa: BLE001
+            logger.debug("cv2 multi-QR detection failed", exc_info=True)
+
+    return payloads
+
+
+def identify_page(question: dict, image_bytes: bytes) -> dict:
+    """
+    Ask the photograph which page it is, instead of being told.
+
+    Every answer box is printed with a QR carrying
+    `question_id|answer_box_id|part|order`, so a page can identify both
+    the paper it belongs to and its own position in it.
+
+    This used to be the caller's guess: the client counted uploads and
+    called the first photo page 0. Photograph page three first and it was
+    extracted against page one's layout — crops taken from the wrong
+    parts of the sheet, with nothing shown to the student but a quiet
+    `qr_check: "fail"` in the manifest.
+
+    Returns {page_index, question_id, verdict, detail}, where verdict is
+    one of:
+      "ok"          — this page belongs here, page_index is trustworthy
+      "wrong_paper" — the QRs name a different question
+      "unreadable"  — no QR could be read; the caller should ask rather
+                      than guess
+    """
+    q_id = question["question_id"]
+
+    try:
+        img, _ = _decode_image(image_bytes)
+    except Exception as exc:  # noqa: BLE001 — an unopenable file is the answer
+        return {
+            "page_index": None,
+            "question_id": None,
+            "verdict": "unreadable",
+            "detail": f"The image could not be opened ({exc}).",
+        }
+
+    if not _zbar_available():
+        # A server-side gap, not a bad photograph. Saying "your photo is
+        # unreadable" here would blame the student for a missing library.
+        return {
+            "page_index": None,
+            "question_id": None,
+            "verdict": "undetermined",
+            "detail": "Page codes cannot be read on this server.",
+        }
+
+    payloads = _decode_all_qrs(img)
+    if not payloads:
+        return {
+            "page_index": None,
+            "question_id": None,
+            "verdict": "unreadable",
+            "detail": (
+                "No answer-box code could be read on this image. It may be "
+                "blurred, too dark, or cropped so the codes are missing."
+            ),
+        }
+
+    foreign = [p for p in payloads if p.get("q") != q_id]
+    if foreign and len(foreign) == len(payloads):
+        return {
+            "page_index": None,
+            "question_id": foreign[0].get("q"),
+            "verdict": "wrong_paper",
+            "detail": "This page belongs to a different question paper.",
+        }
+
+    # Pages are decided by majority, not by the first code read. A
+    # photograph can catch a sliver of the facing page, and one stray
+    # code from it should not decide where the whole sheet goes.
+    votes: dict[int, int] = {}
+    for p in payloads:
+        if p.get("q") != q_id:
+            continue
+        page = page_of_box(question, p.get("b", ""), p.get("part", 0))
+        if page is not None:
+            votes[page] = votes.get(page, 0) + 1
+
+    if not votes:
+        return {
+            "page_index": None,
+            "question_id": q_id,
+            "verdict": "unreadable",
+            "detail": "The codes on this image do not match any page of this paper.",
+        }
+
+    page_index = max(votes, key=lambda k: votes[k])
+    return {
+        "page_index": page_index,
+        "question_id": q_id,
+        "verdict": "ok",
+        "detail": f"Identified as page {page_index + 1} from {votes[page_index]} code(s).",
+    }
 
 
 def extract_page(

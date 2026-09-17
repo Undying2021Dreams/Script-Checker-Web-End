@@ -9,6 +9,31 @@ another student's scanned work.
 
 import pytest
 
+def _photo_bytes() -> bytes:
+    """
+    Bytes that are a real photograph as far as the upload path is
+    concerned.
+
+    Uploads are now judged before extraction — an unopenable or badly
+    blurred file is refused outright — so tests can no longer post the
+    string "not a real image" and expect it through. Random texture
+    gives a sharp, mid-brightness image that passes that check while
+    still carrying no markers, which keeps these tests about submission
+    plumbing rather than extraction.
+    """
+    import io
+
+    import numpy as np
+    from PIL import Image
+
+    rng = np.random.default_rng(1)
+    noise = rng.integers(0, 255, size=(240, 180, 3), dtype=np.uint8)
+    buf = io.BytesIO()
+    Image.fromarray(noise).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+
 from models import AnswerBox, Course, CropImage, Enrollment, Question, Submission
 
 
@@ -102,21 +127,21 @@ def test_enrolled_student_cannot_reach_authoring_routes(client, course, question
     assert client.as_user(student).post(f"/api/questions/{question.id}/finalize").status_code == 404
 
 
-def test_enrolled_student_may_submit_but_outsider_may_not(client, course, question, make_user, db):
+def test_enrolled_student_may_submit_but_outsider_may_not(client, course, question, make_user, db, pages_without_codes):
     student = make_user(role="student")
     outsider = make_user(role="student")
     _enrol(db, course, student)
 
-    # A file has to be attached or request validation (422) short-circuits
-    # before the authorization check ever runs. The bytes aren't a real
-    # image, but extraction reports that in the page result rather than
-    # raising, so the enrolled student still gets a 200 while the outsider
-    # is refused outright.
+    # A real image is needed now: uploads are judged before extraction,
+    # so an unopenable file is refused before authorization is reached
+    # and the test would pass for the wrong reason. This one carries no
+    # markers, which is fine — extraction reports that in the page
+    # result rather than raising.
     def _submit(as_user):
         return client.as_user(as_user).post(
             "/api/submissions",
             data={"question_id": question.id, "modality": "photo"},
-            files={"image": ("page.png", b"not-an-image", "image/png")},
+            files={"image": ("page.png", _photo_bytes(), "image/png")},
         )
 
     assert _submit(student).status_code == 200
@@ -561,7 +586,7 @@ def test_you_cannot_enrol_in_your_own_course(client, db, make_user):
 
 def test_uploading_a_second_page_adds_it_rather_than_replacing_the_first(
     client, course, question, make_user, db
-):
+, pages_without_codes):
     """
     The client used not to send a page index and the server defaulted it
     to zero, so a student's second page silently overwrote their first
@@ -581,7 +606,7 @@ def test_uploading_a_second_page_adds_it_rather_than_replacing_the_first(
         return client.as_user(student).post(
             "/api/submissions",
             data=data,
-            files={"image": ("p.png", io.BytesIO(b"not a real image"), "image/png")},
+            files={"image": ("p.png", io.BytesIO(_photo_bytes()), "image/png")},
         )
 
     first = upload()
@@ -613,11 +638,11 @@ def _upload_page(client, student, question, submission_id=None):
     return client.as_user(student).post(
         "/api/submissions",
         data=data,
-        files={"image": ("p.png", io.BytesIO(b"not a real image"), "image/png")},
+        files={"image": ("p.png", io.BytesIO(_photo_bytes()), "image/png")},
     )
 
 
-def test_a_student_can_remove_a_page_before_handing_in(client, course, question, make_user, db):
+def test_a_student_can_remove_a_page_before_handing_in(client, course, question, make_user, db, pages_without_codes):
     """
     A page of the wrong sheet, or too blurry to read, otherwise stays in
     the script for ever: uploading only ever appends.
@@ -636,7 +661,7 @@ def test_a_student_can_remove_a_page_before_handing_in(client, course, question,
     assert [p["page_index"] for p in res.json()["pages"]] == [0, 2]
 
 
-def test_handing_in_fixes_the_script(client, course, question, make_user, db):
+def test_handing_in_fixes_the_script(client, course, question, make_user, db, pages_without_codes):
     student = make_user(role="student")
     _enrol(db, course, student)
 
@@ -663,7 +688,7 @@ def test_an_empty_script_cannot_be_handed_in(client, course, question, make_user
     assert "at least one page" in res.json()["detail"]
 
 
-def test_a_teacher_may_still_change_a_handed_in_script(client, course, question, make_user, db):
+def test_a_teacher_may_still_change_a_handed_in_script(client, course, question, make_user, db, pages_without_codes):
     """Scanning a corrected page on a student's behalf stays possible."""
     student = make_user(role="student")
     _enrol(db, course, student)
@@ -675,7 +700,7 @@ def test_a_teacher_may_still_change_a_handed_in_script(client, course, question,
     assert client.as_user(teacher).delete(f"/api/submissions/{sub_id}/pages/0").status_code == 200
 
 
-def test_another_student_cannot_touch_your_pages(client, course, question, make_user, db):
+def test_another_student_cannot_touch_your_pages(client, course, question, make_user, db, pages_without_codes):
     student = make_user(role="student")
     other = make_user(role="student")
     _enrol(db, course, student)
@@ -685,7 +710,7 @@ def test_another_student_cannot_touch_your_pages(client, course, question, make_
     assert client.as_user(other).delete(f"/api/submissions/{sub_id}/pages/0").status_code == 404
 
 
-def test_pages_join_the_open_script_even_without_an_id(client, course, question, make_user, db):
+def test_pages_join_the_open_script_even_without_an_id(client, course, question, make_user, db, pages_without_codes):
     """
     The page used to have to remember which submission it was adding to,
     and when that was lost — a reload, or the app resumed from the
@@ -714,7 +739,7 @@ def test_pages_join_the_open_script_even_without_an_id(client, course, question,
     assert db.query(Submission).filter(Submission.student_id == student.id).count() == 1
 
 
-def test_a_handed_in_script_is_not_joined_by_a_later_upload(client, course, question, make_user, db):
+def test_a_handed_in_script_is_not_joined_by_a_later_upload(client, course, question, make_user, db, pages_without_codes):
     """Handing in closes it; a later upload must not reopen it."""
     student = make_user(role="student")
     _enrol(db, course, student)
@@ -726,7 +751,7 @@ def test_a_handed_in_script_is_not_joined_by_a_later_upload(client, course, ques
     assert _upload_page(client, student, question).status_code == 409
 
 
-def test_a_teacher_uploading_starts_a_new_script_each_time(client, course, question, make_user, db):
+def test_a_teacher_uploading_starts_a_new_script_each_time(client, course, question, make_user, db, pages_without_codes):
     """A teacher works through a stack; each script is its own submission."""
     from models import Submission, User
 
@@ -736,3 +761,99 @@ def test_a_teacher_uploading_starts_a_new_script_each_time(client, course, quest
     second = _upload_page(client, teacher, question)
     assert first.json()["submission_id"] != second.json()["submission_id"]
     assert db.query(Submission).filter(Submission.question_id == question.id).count() == 2
+
+
+# ── A page says which page it is ────────────────────────────────────
+
+def _finalized_paper(client, db, teacher, title, box_id):
+    """A finalized question, and the PNG of its own printed first page."""
+    import io
+
+    from pdf2image import convert_from_bytes
+
+    from models import Course
+
+    course = Course(title=title, join_code=title[:6].upper().ljust(6, "0"), teacher_id=teacher.id)
+    db.add(course)
+    db.commit()
+
+    qid = client.as_user(teacher).post(
+        "/api/questions", params={"course_id": course.id}, json={}
+    ).json()["question_id"]
+    client.as_user(teacher).put(
+        f"/api/questions/{qid}/blocks",
+        json={
+            "content": {
+                "type": "doc",
+                "content": [
+                    {"type": "paragraph", "content": [{"type": "text", "text": f"{title}: solve it"}]},
+                    {"type": "answerBox", "attrs": {"id": box_id, "label": "a", "points": 5}},
+                ],
+            },
+            "answer_boxes": [{"id": box_id, "label": "a", "points": 5}],
+            "ground_truth_boxes": [],
+        },
+    )
+    client.as_user(teacher).post(f"/api/questions/{qid}/finalize")
+
+    pdf = client.as_user(teacher).get(f"/api/questions/{qid}/pdf").content
+    page = convert_from_bytes(pdf, dpi=200, fmt="png")[0]
+    buf = io.BytesIO()
+    page.save(buf, format="PNG")
+    return course, qid, buf.getvalue()
+
+
+def test_a_page_identifies_its_own_paper(client, db, make_user):
+    """
+    The photograph says which paper and which page it is, rather than the
+    client being believed. Needs zbar: OpenCV's own detector cannot read
+    the small per-box codes on a full page, which is why the container
+    installs libzbar0.
+    """
+    import pytest
+
+    from services.extractor import _zbar_available, identify_page
+    from routers.questions import _question_to_dict
+    from models import Question
+
+    if not _zbar_available():
+        pytest.skip("zbar not available; page identity cannot be read")
+
+    teacher = make_user(role="teacher")
+    _, qid, page_png = _finalized_paper(client, db, teacher, "Numerical", "n-box")
+
+    q = db.query(Question).filter(Question.id == qid).one()
+    identity = identify_page(_question_to_dict(q), page_png)
+
+    assert identity["verdict"] == "ok", identity
+    assert identity["page_index"] == 0
+    assert identity["question_id"] == qid
+
+
+def test_a_page_from_another_paper_is_refused(client, db, make_user):
+    """
+    Extracting one paper against another's layout produces crops from the
+    wrong parts of the sheet — plausible-looking and meaningless. Better
+    to say so.
+    """
+    import pytest
+
+    from services.extractor import _zbar_available
+
+    if not _zbar_available():
+        pytest.skip("zbar not available; page identity cannot be read")
+
+    teacher = make_user(role="teacher")
+    _, _, other_page = _finalized_paper(client, db, teacher, "Compilers", "c-box")
+    course, qid, _ = _finalized_paper(client, db, teacher, "Numerical", "n-box")
+
+    student = make_user(role="student")
+    _enrol(db, course, student)
+
+    res = client.as_user(student).post(
+        "/api/submissions",
+        data={"question_id": qid, "modality": "photo"},
+        files={"image": ("wrong.png", other_page, "image/png")},
+    )
+    assert res.status_code == 422, res.text
+    assert "different question paper" in res.json()["detail"]
