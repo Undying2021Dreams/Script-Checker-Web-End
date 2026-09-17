@@ -146,3 +146,43 @@ def test_a_scanner_upload_is_left_exactly_as_it_arrived(client, course, db):
         f"/api/submissions/{body['submission_id']}/images/{body['pages'][0]['page_index']}"
     )
     assert stored.content == sent, "a scanner upload was rewritten"
+
+
+def test_a_teacher_can_discard_a_script_and_a_student_cannot(client, course, db, make_user):
+    """
+    Discarding a whole script is the teacher's.
+
+    A student can already take back a page they have not handed in.
+    Letting them throw away a handed-in script would let them unsubmit
+    after seeing a mark, which is the one thing handing in is for.
+    """
+    from models import CropImage, Submission, SubmissionImage
+
+    student = make_user()
+    qid = _finalized_paper(client, course)
+    db.add(Enrollment(course_id=course.id, student_id=student.id))
+    db.commit()
+
+    photo = _photographed(client, course, qid)
+    res = client.as_user(student).post(
+        "/api/submissions",
+        data={"question_id": qid, "modality": "photo", "page_index_hint": "0"},
+        files={"image": ("page.jpg", photo, "image/jpeg")},
+    )
+    assert res.status_code == 200, res.text
+    sub_id = res.json()["submission_id"]
+    assert db.query(SubmissionImage).filter(SubmissionImage.submission_id == sub_id).count()
+
+    # The student who sent it may not discard it.
+    assert client.as_user(student).delete(f"/api/submissions/{sub_id}").status_code == 404
+
+    # Nor may a teacher of some other course.
+    outsider = make_user(role="teacher")
+    assert client.as_user(outsider).delete(f"/api/submissions/{sub_id}").status_code == 404
+
+    assert client.as_user(course.teacher).delete(f"/api/submissions/{sub_id}").status_code == 200
+
+    # And the work goes with it rather than being left behind.
+    assert db.query(Submission).filter(Submission.id == sub_id).count() == 0
+    assert db.query(SubmissionImage).filter(SubmissionImage.submission_id == sub_id).count() == 0
+    assert db.query(CropImage).filter(CropImage.submission_id == sub_id).count() == 0

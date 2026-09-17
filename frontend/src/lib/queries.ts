@@ -306,6 +306,21 @@ export function useSubmissionAnswers(submissionId: string) {
   })
 }
 
+export function useDeleteSubmission(questionId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (submissionId: string) =>
+      apiFetch<{ deleted: string }>(`/submissions/${submissionId}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['submissions', questionId] })
+      // A student's own view of the paper counts their submission, so it
+      // has to hear about this too.
+      qc.invalidateQueries({ queryKey: ['assignments'] })
+    },
+  })
+}
+
+
 export function useUploadSubmission(questionId: string) {
   const qc = useQueryClient()
   return useMutation({

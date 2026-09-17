@@ -699,6 +699,43 @@ def delete_submission_page(
     return sub.manifest
 
 
+@router.delete("/{submission_id}")
+def delete_submission(
+    submission_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Throw a whole script away.
+
+    The teacher's, not the student's. A student can already take back a
+    page they have not handed in; letting them discard a handed-in
+    script would let them unsubmit after seeing a mark. Marking is the
+    teacher's, and so is deciding a script should never have been one —
+    a test run, a stack photographed twice, someone else's paper.
+
+    Everything hanging off the submission — marks, crops, uploaded pages
+    — cascades from this row, so removing it takes the work with it.
+    There is no undo, which is why the client asks first.
+    """
+    sub = _get_submission_or_404(submission_id, db, user)
+
+    course = (
+        db.query(Course)
+        .join(Question, Question.course_id == Course.id)
+        .filter(Question.id == sub.question_id)
+        .first()
+    )
+    if user.role != "admin" and (course is None or course.teacher_id != user.id):
+        # 404 rather than 403: a student poking at ids should not be
+        # able to confirm whose script a given one is.
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Submission not found")
+
+    db.delete(sub)
+    db.commit()
+    return {"deleted": submission_id}
+
+
 @router.post("/{submission_id}/submit")
 def hand_in_submission(
     submission_id: str,
