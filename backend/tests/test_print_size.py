@@ -94,3 +94,80 @@ def test_paper_is_a4_sized():
     w, h = pages[0].size
     assert abs(w - round(8.27 * 150)) <= 4, f"page is {w}px wide at 150 DPI, not A4"
     assert abs(h - round(11.69 * 150)) <= 4, f"page is {h}px tall at 150 DPI, not A4"
+
+
+def _paper_with_box_pushed_down(
+    filler_lines: int, width_percent: int = 50, min_height: int = 1200
+) -> dict:
+    """A tall answer box preceded by enough text to start it near the
+    bottom of a page — the case where it has to be split."""
+    para = {"type": "paragraph", "content": [{"type": "text", "text": "Filler line. " * 6}]}
+    return {
+        "question_id": "split-q",
+        "physical_page": "A4",
+        "dpi": 150,
+        "answer_boxes": [],
+        "content": {
+            "type": "doc",
+            "content": [
+                *[dict(para) for _ in range(filler_lines)],
+                {
+                    "type": "answerBox",
+                    "attrs": {"id": "tall", "label": "a", "minHeight": min_height,
+                              "widthPercent": width_percent},
+                },
+            ],
+        },
+    }
+
+
+def test_a_split_answer_box_never_leaves_a_strip_too_small_to_write_in():
+    """
+    A box taller than the room left on the page is cut into strips. They
+    used to be allowed down to 20 canonical pixels — two millimetres of
+    paper, printed with a label on it and useless to write in.
+
+    The sweep is the point: the bug only appeared at the few filler
+    counts that happened to land the box near a page boundary, which is
+    why a single fixed case would not have caught it. At 24 lines the
+    last strip came out 34px tall, and a whole page existed to carry it.
+    """
+    # A fixed physical size, not the module's own constant: asserting a
+    # strip is at least MIN_SEGMENT_H tall when MIN_SEGMENT_H is what
+    # produced it proves nothing, and passed at the old 20px.
+    smallest_usable_inches = 0.8
+
+    worst = None
+    for filler in range(14, 32):
+        layout = render_finalized_question(_paper_with_box_pushed_down(filler))
+        for page_index, _x, _y, _w, height in layout["boxes"]["tall"]:
+            if worst is None or height < worst[0]:
+                worst = (height, filler, page_index)
+
+    assert worst is not None
+    height, filler, page_index = worst
+    assert height / 150 >= smallest_usable_inches, (
+        f"a strip {height / 150:.2f} inch tall was printed on page "
+        f"{page_index + 1} with {filler} lines of text above the box"
+    )
+
+
+def test_a_box_that_splits_across_pages_is_printed_full_width():
+    """A 50% box that fits on one page stays 50%. The same box, pushed
+    down far enough to need a second page, is widened to the full
+    column — a narrow strip continuing overleaf reads as a different
+    box rather than the rest of the same one."""
+    fits = render_finalized_question(
+        _paper_with_box_pushed_down(2, width_percent=50, min_height=400)
+    )
+    assert len(fits["boxes"]["tall"]) == 1, "expected this one not to split"
+    narrow_w = fits["boxes"]["tall"][0][3]
+
+    splits = render_finalized_question(_paper_with_box_pushed_down(24, width_percent=50))
+    assert len(splits["boxes"]["tall"]) > 1, "expected this one to split"
+    widths = {seg[3] for seg in splits["boxes"]["tall"]}
+
+    assert len(widths) == 1, f"the strips came out different widths: {sorted(widths)}"
+    assert widths.pop() > narrow_w * 1.8, (
+        f"a split box printed {narrow_w}px wide — the same as when it fits on one page"
+    )
