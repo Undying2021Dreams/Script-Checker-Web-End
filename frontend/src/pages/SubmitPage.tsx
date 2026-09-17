@@ -15,6 +15,8 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import { CardSkeleton, EmptyState, PageHeader, Pending, StatusPill } from '@/components/ui/feedback'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   useDeleteSubmissionPage,
   useHandInSubmission,
@@ -43,6 +45,9 @@ export function SubmitPage() {
 
   const courseId = params.get('course') ?? ''
   const [submissionId, setSubmissionId] = useState<string | null>(params.get('submission'))
+  // Held while asking which page an unreadable photograph belongs to.
+  const [naming, setNaming] = useState<{ file: File; message: string } | null>(null)
+  const [namedPage, setNamedPage] = useState('')
 
   const cameraRef = useRef<HTMLInputElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -54,6 +59,12 @@ export function SubmitPage() {
 
   const pages = data?.pages ?? []
 
+  const send = async (file: File, id: string | undefined, pageIndex?: number) => {
+    const result = await upload.mutateAsync({ file, modality: 'photo', submissionId: id, pageIndex })
+    setSubmissionId(result.submission_id)
+    return result.submission_id
+  }
+
   const addFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? [])
     if (files.length === 0) return
@@ -62,21 +73,43 @@ export function SubmitPage() {
     let done = 0
     try {
       for (const file of files) {
-        const result = await upload.mutateAsync({ file, modality: 'photo', submissionId: id })
-        id = result.submission_id
-        setSubmissionId(result.submission_id)
+        id = await send(file, id)
         done += 1
       }
       toast.success(files.length === 1 ? 'Page added' : `${files.length} pages added`)
     } catch (err) {
-      toast.error(
-        done > 0
-          ? `Added ${done} of ${files.length}, then: ${(err as Error).message}`
-          : (err as Error).message,
-      )
+      const message = (err as Error).message
+      // The page could not identify itself and nothing is wrong with the
+      // photograph as such, so offer the way out the paper provides:
+      // read the printed page number and say which one it is.
+      if (/which page/i.test(message)) {
+        setNaming({ file: files[done], message })
+      } else {
+        toast.error(
+          done > 0 ? `Added ${done} of ${files.length}, then: ${message}` : message,
+        )
+      }
     } finally {
       if (cameraRef.current) cameraRef.current.value = ''
       if (fileRef.current) fileRef.current.value = ''
+    }
+  }
+
+  const addNamedPage = async () => {
+    if (!naming) return
+    const n = Number(namedPage)
+    if (!Number.isInteger(n) || n < 1) {
+      toast.error('Give the page number printed at the bottom of the sheet.')
+      return
+    }
+    try {
+      // Printed as "Page 1 of n"; stored from zero.
+      await send(naming.file, submissionId ?? undefined, n - 1)
+      toast.success(`Added as page ${n}`)
+      setNaming(null)
+      setNamedPage('')
+    } catch (err) {
+      toast.error((err as Error).message)
     }
   }
 
@@ -134,6 +167,36 @@ export function SubmitPage() {
           className="hidden"
         />
       </div>
+
+      {/* The photograph is fine; its printed codes just could not be
+          read. The sheet says which page it is, so ask rather than
+          refuse outright. */}
+      <Dialog open={!!naming} onOpenChange={(open) => !open && setNaming(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Which page is this?</DialogTitle>
+            <DialogDescription>
+              {naming?.message} Look at the bottom of the sheet — it is printed there.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="page-number">Page number</Label>
+            <Input
+              id="page-number"
+              value={namedPage}
+              onChange={(e) => setNamedPage(e.target.value)}
+              inputMode="numeric"
+              placeholder="e.g. 2"
+            />
+          </div>
+          <DialogFooter>
+            <DialogClose render={<Button variant="ghost">Take it again instead</Button>} />
+            <Button onClick={addNamedPage} disabled={upload.isPending || !namedPage.trim()}>
+              {upload.isPending ? <Pending>Adding…</Pending> : 'Add this page'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {isLoading && <CardSkeleton rows={3} />}
 

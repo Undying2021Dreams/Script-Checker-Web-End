@@ -290,12 +290,27 @@ export function useSubmissionAnswers(submissionId: string) {
 export function useUploadSubmission(questionId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ file, modality, submissionId }: { file: File; modality: string; submissionId?: string }) => {
+    mutationFn: ({
+      file,
+      modality,
+      submissionId,
+      pageIndex,
+    }: {
+      file: File
+      modality: string
+      submissionId?: string
+      // Only when the student names the page themselves, because its
+      // printed codes could not be read. Sending it otherwise would
+      // override what the page says about itself — and replace that
+      // page rather than adding one.
+      pageIndex?: number
+    }) => {
       const form = new FormData()
       form.append('question_id', questionId)
       form.append('modality', modality)
       form.append('image', file)
       if (submissionId) form.append('submission_id', submissionId)
+      if (pageIndex !== undefined) form.append('page_index', String(pageIndex))
       return apiFetch<{ submission_id: string; pages: unknown[] }>('/submissions', {
         method: 'POST',
         body: form,
