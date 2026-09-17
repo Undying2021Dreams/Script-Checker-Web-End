@@ -1033,19 +1033,6 @@ def clone_question(question_id: str, user: User = Depends(get_current_user), db:
 
     new_id = str(uuid.uuid4())
 
-    orig_images = db.query(UploadedImage).filter(UploadedImage.question_id == original.id).all()
-    filename_to_new_id = {}
-    for orig in orig_images:
-        new_img = UploadedImage(
-            question_id=new_id,
-            filename=orig.filename,
-            content_type=orig.content_type,
-            data=orig.data,
-        )
-        db.add(new_img)
-        db.flush()
-        filename_to_new_id[orig.filename] = new_img.id
-
     import copy
     new_content = copy.deepcopy(original.content)
 
@@ -1063,11 +1050,16 @@ def clone_question(question_id: str, user: User = Depends(get_current_user), db:
             return
         t = node.get("type")
         if t == "image":
+            # Matched on the original image's id, which is what the src
+            # actually contains: ".../api/images/{id}". This used to
+            # match on the filename, which never appears in a src — so a
+            # clone kept pointing at the original's pictures, and
+            # deleting the original would have taken them with it.
             attrs = node.get("attrs") or {}
             src = attrs.get("src", "")
-            for old_filename, new_id in filename_to_new_id.items():
-                if old_filename in src:
-                    attrs["src"] = f"{settings.public_base_url}/api/images/{new_id}"
+            for old_image_id, new_image_id in old_image_id_to_new.items():
+                if old_image_id in src:
+                    attrs["src"] = f"{settings.public_base_url}/api/images/{new_image_id}"
                     break
         elif t == "answerBox":
             attrs = node.get("attrs") or {}
@@ -1079,9 +1071,6 @@ def clone_question(question_id: str, user: User = Depends(get_current_user), db:
                 attrs["id"] = gt_box_id_map[attrs["id"]]
         for child in node.get("content") or []:
             _walk(child)
-
-    if new_content:
-        _walk(new_content)
 
     new_q = Question(
         id=new_id,
@@ -1095,11 +1084,43 @@ def clone_question(question_id: str, user: User = Depends(get_current_user), db:
         state="draft",
         physical_page=original.physical_page,
         dpi=original.dpi,
-        content=new_content,
+        # Set after the remap below, not here. The row is inserted at the
+        # flush that follows, and _walk then edits this document in
+        # place — a mutation SQLAlchemy cannot see on a JSON column, so
+        # the clone kept the original's image ids however correct the
+        # remap was.
+        content=None,
         derived_from=original.id,
     )
     db.add(new_q)
+    # Before the images: uploaded_images.question_id is a real foreign
+    # key, so copying them against an id no row carries yet is refused
+    # outright. They used to be inserted first, which only failed once a
+    # question actually had an image on it — the same ordering mistake
+    # crop_images made, from the other end.
     db.flush()
+
+    orig_images = db.query(UploadedImage).filter(UploadedImage.question_id == original.id).all()
+    old_image_id_to_new: dict[str, str] = {}
+    for orig in orig_images:
+        new_img = UploadedImage(
+            question_id=new_q.id,
+            filename=orig.filename,
+            content_type=orig.content_type,
+            data=orig.data,
+        )
+        db.add(new_img)
+        db.flush()
+        old_image_id_to_new[orig.id] = new_img.id
+
+    # Only now can the document be remapped: the box ids are renamed in
+    # the same pass, but the image sources can only point at the copies
+    # once the copies exist.
+    if new_content:
+        _walk(new_content)
+    # A fresh assignment, so the change is seen: the column went from
+    # None to a document rather than being edited underneath.
+    new_q.content = new_content
 
     for i, b in enumerate(original.answer_boxes):
         db.add(AnswerBox(

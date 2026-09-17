@@ -950,3 +950,59 @@ def test_the_scheme_suggests_marks_without_applying_them(client, db, make_user):
     # Reading it changed nothing.
     from models import AnswerBox
     assert db.query(AnswerBox).filter(AnswerBox.id == "b1").one().points == 3
+
+
+def test_cloning_a_question_that_has_an_image(client, db, make_user):
+    """
+    uploaded_images.question_id is a real foreign key, and the copies
+    were being inserted before the question row they point at existed.
+    It only failed once a paper actually had an image on it — the same
+    ordering mistake crop_images made, from the other end.
+
+    The clone must also point at its own copies, not the original's:
+    deleting the original would otherwise take the clone's pictures
+    with it.
+    """
+    from models import Course, Question, UploadedImage
+
+    teacher = make_user(role="teacher")
+    course = Course(title="Figures", join_code="FIG001", teacher_id=teacher.id)
+    db.add(course)
+    db.commit()
+
+    qid = client.as_user(teacher).post(
+        "/api/questions", params={"course_id": course.id}, json={}
+    ).json()["question_id"]
+
+    image = UploadedImage(question_id=qid, filename="figure.png",
+                          data=_photo_bytes(), content_type="image/png")
+    db.add(image)
+    db.commit()
+
+    client.as_user(teacher).put(f"/api/questions/{qid}/blocks", json={
+        "content": {"type": "doc", "content": [
+            {"type": "paragraph", "content": [{"type": "text", "text": "See the figure:"}]},
+            {"type": "image", "attrs": {"src": f"/api/images/{image.id}", "alt": "figure.png"}},
+            {"type": "groundTruthBox", "attrs": {"id": "gt-f"}, "content": [
+                {"type": "paragraph", "content": [{"type": "text", "text": "answer - 5 marks"}]}]},
+            {"type": "answerBox", "attrs": {"id": "b-f", "label": "a", "points": 5}},
+        ]},
+        "answer_boxes": [{"id": "b-f", "label": "a", "points": 5}],
+        "ground_truth_boxes": [{"id": "gt-f", "label": ""}],
+    })
+    assert client.as_user(teacher).post(f"/api/questions/{qid}/finalize").status_code == 200
+
+    res = client.as_user(teacher).post(f"/api/questions/{qid}/clone")
+    assert res.status_code == 201, res.text
+    clone_id = res.json()["question_id"]
+
+    copies = db.query(UploadedImage).filter(UploadedImage.question_id == clone_id).all()
+    assert len(copies) == 1, "the clone should carry its own copy of the image"
+    assert copies[0].id != image.id
+    assert bytes(copies[0].data) == _photo_bytes()
+
+    # And the clone's document points at its own copy.
+    clone = db.query(Question).filter(Question.id == clone_id).one()
+    srcs = [n["attrs"]["src"] for n in clone.content["content"] if n.get("type") == "image"]
+    assert srcs and copies[0].id in srcs[0], srcs
+    assert image.id not in srcs[0], "clone still points at the original's image"
