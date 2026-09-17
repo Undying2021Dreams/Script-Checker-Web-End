@@ -300,8 +300,8 @@ export function QuestionEditorPage() {
       {!isFinalized && (
         <p className="text-sm text-muted-foreground">
           Finalizing freezes the layout and prints the alignment markers students' scans are
-          matched against. It also reads what each part is worth from the marking scheme in its
-          model answer. You can still edit freely now; once finalized, changes go into a new
+          matched against. What each part is worth is whatever you set above — finalizing is
+          refused until every part has a mark. You can still edit freely now; once finalized, changes go into a new
           copy instead.
         </p>
       )}
