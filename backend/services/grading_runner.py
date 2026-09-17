@@ -21,14 +21,16 @@ from models import (
     GroundTruthImage,
     Question,
     Submission,
+    UploadedImage,
 )
 from services.grading import (
     AnswerToGrade,
     grade_one,
     pair_answer_boxes_with_ground_truth,
+    question_nodes_by_ground_truth_box,
     question_text_by_ground_truth_box,
 )
-from services.llm_provider import LLMProvider, extract_plain_text
+from services.llm_provider import LLMProvider, extract_image_ids, extract_plain_text
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +47,7 @@ def build_grading_items(db: Session, submission: Submission) -> list[AnswerToGra
 
     pairing = pair_answer_boxes_with_ground_truth(question.content)
     question_text_by_gt = question_text_by_ground_truth_box(question.content)
+    question_nodes_by_gt = question_nodes_by_ground_truth_box(question.content)
     whole_paper_text = extract_plain_text(question.content or {})
 
     gt_boxes = {b.id: b for b in question.ground_truth_boxes}
@@ -91,6 +94,20 @@ def build_grading_items(db: Session, submission: Submission) -> list[AnswerToGra
                 if img.data:
                     gt_images.append((bytes(img.data), img.content_type or "image/png"))
 
+        # Figures the question itself carries. Marking a geometry question
+        # without its figure asks the model to judge working against a
+        # diagram it was never shown.
+        question_images: list[tuple[bytes, str]] = []
+        seen_image_ids: set[str] = set()
+        for gt_id in gt_ids:
+            for img_id in extract_image_ids(question_nodes_by_gt.get(gt_id, [])):
+                if img_id in seen_image_ids:
+                    continue
+                seen_image_ids.add(img_id)
+                img = db.query(UploadedImage).filter(UploadedImage.id == img_id).first()
+                if img and img.data:
+                    question_images.append((bytes(img.data), img.content_type or "image/png"))
+
         ground_truth_text = "\n\n".join(
             text
             for text in (extract_plain_text(gt_box.content or {}) for gt_box in paired)
@@ -109,6 +126,7 @@ def build_grading_items(db: Session, submission: Submission) -> list[AnswerToGra
                 max_score=box.points or 0,
                 question_text=question_text or whole_paper_text,
                 ground_truth_text=ground_truth_text,
+                question_images=question_images,
                 ground_truth_images=gt_images,
                 crops=[
                     (bytes(c.data), c.content_type or "image/png")
