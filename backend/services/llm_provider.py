@@ -124,8 +124,28 @@ def _build_user_message(question_text: str, boxes: list[dict]) -> str:
     return json.dumps({"question_text": question_text, "answer_boxes": boxes}, ensure_ascii=False)
 
 
-def _build_correctness_message(question_text: str, answer_text: str) -> str:
-    return json.dumps({"question_text": question_text, "answer_text": answer_text}, ensure_ascii=False)
+def _build_correctness_message(
+    question_text: str,
+    answer_text: str,
+    n_question_images: int = 0,
+    n_answer_images: int = 0,
+) -> str:
+    """
+    The check's user message.
+
+    Says how many images belong to the question and how many to the
+    answer, and in what order, because they arrive as one flat list. A
+    diagram the question depends on and a diagram the answer works
+    through are different things, and a model told only "here are three
+    images" has to guess which is which.
+    """
+    payload = {"question_text": question_text, "answer_text": answer_text}
+    if n_question_images or n_answer_images:
+        payload["images"] = (
+            f"The first {n_question_images} image(s) belong to the QUESTION; "
+            f"the remaining {n_answer_images} belong to the ANSWER."
+        )
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def _clean_latex(text: str) -> str:
@@ -252,7 +272,11 @@ class LLMProvider(ABC):
 
     @abstractmethod
     async def check_correctness(
-        self, question_text: str, answer_text: str, answer_images: list[tuple[bytes, str]]
+        self,
+        question_text: str,
+        answer_text: str,
+        answer_images: list[tuple[bytes, str]],
+        question_images: list[tuple[bytes, str]] | None = None,
     ) -> dict:
         """Return {ok, issue, explanation, suggested_question, suggested_answer}."""
         ...
@@ -312,7 +336,11 @@ class GeminiProvider(LLMProvider):
         return _clean_latex(response.text)
 
     async def check_correctness(
-        self, question_text: str, answer_text: str, answer_images: list[tuple[bytes, str]]
+        self,
+        question_text: str,
+        answer_text: str,
+        answer_images: list[tuple[bytes, str]],
+        question_images: list[tuple[bytes, str]] | None = None,
     ) -> dict:
         api_key = settings.GEMINI_API_KEY
         if not api_key:
@@ -322,8 +350,10 @@ class GeminiProvider(LLMProvider):
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel(self.MODEL)
 
-        parts = [CORRECTNESS_SYSTEM_PROMPT + "\n\n" + _build_correctness_message(question_text, answer_text)]
-        for image_bytes, content_type in answer_images:
+        parts = [CORRECTNESS_SYSTEM_PROMPT + "\n\n" + _build_correctness_message(
+            question_text, answer_text, len(question_images or []), len(answer_images)
+        )]
+        for image_bytes, content_type in [*(question_images or []), *answer_images]:
             parts.append({"mime_type": content_type, "data": image_bytes})
 
         response = model.generate_content(
@@ -417,10 +447,16 @@ class OpenAIProvider(LLMProvider):
         return _clean_latex(resp.json()["choices"][0]["message"]["content"])
 
     async def check_correctness(
-        self, question_text: str, answer_text: str, answer_images: list[tuple[bytes, str]]
+        self,
+        question_text: str,
+        answer_text: str,
+        answer_images: list[tuple[bytes, str]],
+        question_images: list[tuple[bytes, str]] | None = None,
     ) -> dict:
-        content = [{"type": "text", "text": _build_correctness_message(question_text, answer_text)}]
-        for image_bytes, content_type in answer_images:
+        content = [{"type": "text", "text": _build_correctness_message(
+            question_text, answer_text, len(question_images or []), len(answer_images)
+        )}]
+        for image_bytes, content_type in [*(question_images or []), *answer_images]:
             content.append({"type": "image_url", "image_url": {"url": _to_data_url(image_bytes, content_type)}})
 
         payload = {
@@ -501,10 +537,16 @@ class ClaudeProvider(LLMProvider):
         return _clean_latex(resp.json()["content"][0]["text"])
 
     async def check_correctness(
-        self, question_text: str, answer_text: str, answer_images: list[tuple[bytes, str]]
+        self,
+        question_text: str,
+        answer_text: str,
+        answer_images: list[tuple[bytes, str]],
+        question_images: list[tuple[bytes, str]] | None = None,
     ) -> dict:
-        content = [{"type": "text", "text": _build_correctness_message(question_text, answer_text)}]
-        for image_bytes, content_type in answer_images:
+        content = [{"type": "text", "text": _build_correctness_message(
+            question_text, answer_text, len(question_images or []), len(answer_images)
+        )}]
+        for image_bytes, content_type in [*(question_images or []), *answer_images]:
             b64 = base64.b64encode(image_bytes).decode("ascii")
             content.append({"type": "image", "source": {"type": "base64", "media_type": content_type, "data": b64}})
 
@@ -601,15 +643,21 @@ class SelfHostedProvider(LLMProvider):
         return _clean_latex(data["choices"][0]["message"]["content"])
 
     async def check_correctness(
-        self, question_text: str, answer_text: str, answer_images: list[tuple[bytes, str]]
+        self,
+        question_text: str,
+        answer_text: str,
+        answer_images: list[tuple[bytes, str]],
+        question_images: list[tuple[bytes, str]] | None = None,
     ) -> dict:
         endpoint = settings.SELF_HOSTED_LLM_URL
         if not endpoint:
             raise ValueError("SELF_HOSTED_LLM_URL is not set.")
 
         url = endpoint.rstrip("/") + "/chat/completions"
-        content = [{"type": "text", "text": _build_correctness_message(question_text, answer_text)}]
-        for image_bytes, content_type in answer_images:
+        content = [{"type": "text", "text": _build_correctness_message(
+            question_text, answer_text, len(question_images or []), len(answer_images)
+        )}]
+        for image_bytes, content_type in [*(question_images or []), *answer_images]:
             content.append({"type": "image_url", "image_url": {"url": _to_data_url(image_bytes, content_type)}})
 
         payload = {
