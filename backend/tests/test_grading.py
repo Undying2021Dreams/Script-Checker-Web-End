@@ -803,6 +803,19 @@ def test_model_answer_is_withheld_until_marks_are_released(client, graded_setup,
     # the whole, not an eleventh mark on top of the parts.
     ("This question is worth 10 marks. Give 4 marks for setup, 6 marks for the answer.", 10),
     ("Out of 8 marks: 3 marks method, 5 marks answer", 8),
+    # A real scheme from this project. Two things here defeat adding up:
+    # the stated maximum puts its number *after* the word ("Max marks -
+    # 13"), and one line is an alternative route rather than a further
+    # criterion. Summed, it comes to 30 for a question worth 13.
+    (
+        "Marking Schema:\n"
+        "For finding the correct equation for ACB triangle - 5 marks\n"
+        "For finding the correct equation for ADB triangle - 5 marks\n"
+        "For correctly finding the solution - 8 marks\n"
+        "Any other valid solution  - 12 marks\n"
+        "Max marks - 13",
+        13,
+    ),
     ("Maximum 12 marks. 6 marks each for the two parts.", 12),
     # Two figures introduced the same way, so neither is the whole.
     ("Step A is worth 5 marks, step B is worth 5 marks", 10),
