@@ -262,7 +262,15 @@ _GROUND_TRUTH_HTML_TEMPLATE = """<!doctype html><html><head><meta charset="utf-8
 body{{margin:0;padding:24px;font-family:Georgia,'Times New Roman',serif;color:#111}}
 p{{margin:0 0 10px;font-size:15px;line-height:1.5}}
 h1,h2,h3{{margin:14px 0 8px}}
-ul,ol{{margin:0 0 10px 22px}}
+/* Explicit, because a marking scheme is usually a numbered list and
+   this render is what the grading model is shown. */
+ul,ol{{margin:0 0 10px 0;padding-left:26px}}
+ul{{list-style:disc}}
+ol{{list-style:decimal}}
+ul ul{{list-style:circle}}
+ol ol{{list-style:lower-alpha}}
+li{{margin:2px 0}}
+li>p{{margin:0}}
 .question-image{{max-width:100%;display:block;margin:10px 0}}
 .eq-block{{display:block;text-align:center;margin:10px 0}}
 .eq-inline{{}}
@@ -349,7 +357,15 @@ def render_question_to_image(
 body{{margin:0;padding:32px;font-family:Georgia,'Times New Roman',serif;color:#111;background:#fff}}
 p{{margin:0 0 12px;font-size:16px;line-height:1.6}}
 h1,h2,h3{{margin:18px 0 10px}}
-ul,ol{{margin:0 0 12px 24px}}
+/* Explicit, because a marking scheme is usually a numbered list and
+   this render is what the grading model is shown. */
+ul,ol{{margin:0 0 12px 0;padding-left:26px}}
+ul{{list-style:disc}}
+ol{{list-style:decimal}}
+ul ul{{list-style:circle}}
+ol ol{{list-style:lower-alpha}}
+li{{margin:2px 0}}
+li>p{{margin:0}}
 .question-image{{max-width:100%;display:block;margin:12px 0;border-radius:4px}}
 .eq-block{{display:block;text-align:center;margin:14px 0}}
 .eq-inline{{}}
@@ -580,7 +596,19 @@ body{{margin:0}}
 .content{{position:absolute;left:{L}px;top:{T}px;width:{CW}px;font-family:Georgia,'Times New Roman',serif}}
 .content p{{margin:0 0 10px;font-size:15px;line-height:1.5;color:#111}}
 .content h1,.content h2,.content h3{{margin:14px 0 8px}}
-.content ul,.content ol{{margin:0 0 10px 22px}}
+/* Stated rather than left to the browser's defaults, and kept in step
+   with editor.css so a list sits the same on paper as in the editor
+   that made it. */
+.content ul,.content ol{{margin:0 0 10px 0;padding-left:26px}}
+.content ul{{list-style:disc}}
+.content ol{{list-style:decimal}}
+.content ul ul{{list-style:circle}}
+.content ul ul ul{{list-style:square}}
+.content ol ol{{list-style:lower-alpha}}
+.content ol ol ol{{list-style:lower-roman}}
+.content li{{margin:2px 0}}
+.content li>ul,.content li>ol{{margin-bottom:0}}
+.content li>p{{margin:0}}
 .answer-box-node{{border:2px dashed #999;border-radius:6px;margin:0 0 10px 0;padding:8px;box-sizing:border-box;background:#fff}}
 .ab-label{{font-size:11px;font-weight:bold;color:#888}}
 .question-image{{max-width:100%;display:block;margin:10px 0}}
