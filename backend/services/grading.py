@@ -224,43 +224,49 @@ def pair_answer_boxes_with_ground_truth(content_doc: dict | None) -> dict[str, l
 # mark while the scheme beside them was worth ten.
 _SCHEME_ITEM_RE = re.compile(r"(\d+(?:\.\d+)?)\s*marks?\b", re.IGNORECASE)
 
-# Words that mark a figure as the whole rather than a part of it.
-# The keyword has to sit immediately before the figure. Allowing a wider
-# gap let "Out of 8 marks: 3 marks method" flag all three figures as the
-# whole, since "out of" was still visible behind each of them.
-_SCHEME_WHOLE_RE = re.compile(r"(?:total|worth|out of|maximum|max)\b[^.\n]{0,6}$", re.IGNORECASE)
+# A figure the teacher has named as the whole, in either order:
+# "Total: 10 marks", "worth 10 marks", "Max marks - 13", "out of 8".
+#
+# Both orders matter. A scheme ending "Max marks - 13" puts the number
+# after the word, and reading only "N marks" missed it entirely — then
+# summed the criteria above it to 30 for a paper worth 13.
+_SCHEME_WHOLE_RE = re.compile(
+    r"(?:total|maximum|max|out of|worth)\b[^.\n]{0,20}?(\d+(?:\.\d+)?)",
+    re.IGNORECASE,
+)
 
 
 def marking_scheme_total(text: str | None) -> int | None:
     """
     What a marking scheme adds up to, or None if it doesn't state one.
 
-    A figure introduced by "total", "worth" or "out of" is the whole
-    thing, not one more criterion. A rubric that opens "this question is
-    worth 10 marks" and then breaks that ten down would otherwise come
-    to twenty — the total counted once as itself and again as its parts.
+    A figure the teacher names as the whole wins over summing the parts,
+    and settles cases no amount of adding up could. Schemes routinely
+    offer alternative routes — "any other valid solution - 12 marks" is
+    not a thirteenth criterion to be added on top — and nothing in the
+    text distinguishes an alternative from an extra. A stated maximum
+    does, which is why it is taken first.
 
-    That only holds when exactly one figure is flagged that way. "Step A
-    is worth 5 marks, step B is worth 5 marks" flags two, neither of
+    That only holds when exactly one figure is named that way. "Step A
+    is worth 5 marks, step B is worth 5 marks" names two, neither of
     which is the whole, so those are summed like any other breakdown.
 
     Returns None rather than guessing whenever the answer would be
-    unsound — no figure given in marks at all, or a total that isn't a
-    whole number, since a box carries whole marks. The caller leaves the
+    unsound — no figure given at all, or a total that isn't a whole
+    number, since a box carries whole marks. The caller leaves the
     existing value alone in that case.
     """
     if not text:
         return None
 
-    matches = list(_SCHEME_ITEM_RE.finditer(text))
-    if not matches:
-        return None
-
-    whole = [m for m in matches if _SCHEME_WHOLE_RE.search(text[: m.start()])]
-    if len(whole) == 1:
-        value = float(whole[0].group(1))
+    stated = _SCHEME_WHOLE_RE.findall(text)
+    if len(stated) == 1:
+        value = float(stated[0])
     else:
-        value = sum(float(m.group(1)) for m in matches)
+        found = _SCHEME_ITEM_RE.findall(text)
+        if not found:
+            return None
+        value = sum(float(n) for n in found)
 
     if value <= 0 or value != int(value):
         return None
