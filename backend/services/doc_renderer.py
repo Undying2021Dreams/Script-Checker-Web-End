@@ -507,7 +507,8 @@ window.__ready = true;
 
 # ── Pagination simulation ────────────────────────────────────────────
 
-# Canonical px, so this is an inch of paper at 150 DPI.
+# Canonical px, so this is about 4cm of paper at 150 DPI — four or five
+# lines of handwriting, rather than the one inch it started at.
 #
 # A box taller than the space left on the page is split, and the strip
 # left behind used to be allowed down to 20px — two millimetres. Worse,
@@ -516,7 +517,7 @@ window.__ready = true;
 # millimetres at the bottom of one sheet and leave a matching sliver at
 # the top of another. A strip nobody can write in is worse than a page
 # break: it takes the room and gives nothing back.
-MIN_SEGMENT_H = 150.0
+MIN_SEGMENT_H = 240.0
 
 
 def _paginate(blocks: list[dict], rects: list[dict], usable_h: float):

@@ -21,7 +21,8 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
-import { apiFetch, apiFetchBlobUrl } from '@/lib/api'
+import { apiFetch } from '@/lib/api'
+import { openAuthedPdf } from '@/lib/pdf'
 import { Input } from '@/components/ui/input'
 import {
   useCloneQuestion,
@@ -193,12 +194,11 @@ export function QuestionEditorPage() {
     if (openingPdf) return
     setOpeningPdf(true)
     try {
-      // The PDF endpoint needs a bearer token, so it has to be fetched
-      // rather than linked to directly.
-      const url = await apiFetchBlobUrl(`/questions/${questionId}/pdf`)
-      window.open(url, '_blank')
-      // Give the new tab time to load it before releasing the blob.
-      setTimeout(() => URL.revokeObjectURL(url), 60_000)
+      const name = `${question?.title || 'paper'}.pdf`.replace(/[/\\]/g, '-')
+      const how = await openAuthedPdf(`/questions/${questionId}/pdf`, name)
+      if (how === 'download') {
+        toast.success('Your browser blocked the new tab, so the PDF was saved instead.')
+      }
     } catch (err) {
       toast.error(`Could not open the PDF: ${(err as Error).message}`)
     } finally {
