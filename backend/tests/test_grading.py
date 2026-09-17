@@ -914,3 +914,73 @@ def test_a_teacher_may_still_upload_after_marking(client, graded_setup, db, monk
     )
     # Not blocked by the resubmission rule; the bad image fails later.
     assert res.status_code != 409
+
+
+# ── The checker sees the question's own diagrams ────────────────────
+
+def test_an_image_in_the_question_reaches_the_correctness_check(
+    client, db, make_user, monkeypatch
+):
+    """
+    Only the question's *text* used to be sent. A question built around a
+    diagram arrived without it, and the check reported the paper as
+    unanswerable — describing a fault it had been handed rather than one
+    the teacher had written.
+    """
+    from models import Course, GroundTruthBox, Question, UploadedImage
+
+    seen: dict = {}
+
+    class CapturingProvider:
+        async def check_correctness(self, question_text, answer_text, answer_images,
+                                    question_images=None):
+            seen["question_images"] = question_images or []
+            seen["answer_images"] = answer_images
+            return {"ok": True, "issue": None, "explanation": "fine",
+                    "suggested_question": None, "suggested_answer": None}
+
+    monkeypatch.setattr("services.llm_provider.get_provider", lambda name: CapturingProvider())
+
+    teacher = make_user(role="teacher")
+    course = Course(title="Geometry", join_code="GEO001", teacher_id=teacher.id)
+    db.add(course)
+    db.commit()
+
+    content = {
+        "type": "doc",
+        "content": [
+            {"type": "paragraph", "content": [{"type": "text", "text": "Find angle x in the figure:"}]},
+            {"type": "image", "attrs": {"src": "/api/images/DIAGRAM", "alt": "figure"}},
+            {"type": "groundTruthBox", "attrs": {"id": "gt-geo"}},
+        ],
+    }
+    q = Question(course_id=course.id, created_by=teacher.id, state="draft", content=content)
+    db.add(q)
+    db.flush()
+
+    # uploaded_images.question_id is NOT NULL, so the image belongs to a
+    # question and the question has to exist first.
+    diagram = UploadedImage(question_id=q.id, filename="figure.png",
+                            data=_photo_bytes(), content_type="image/png")
+    db.add(diagram)
+    db.flush()
+    q.content = {
+        **content,
+        "content": [
+            {**n, "attrs": {**n["attrs"], "src": f"/api/images/{diagram.id}"}}
+            if n.get("type") == "image" else n
+            for n in content["content"]
+        ],
+    }
+    db.add(GroundTruthBox(id="gt-geo", question_id=q.id, order_index=0,
+                          content={"type": "doc", "content": [
+                              {"type": "paragraph", "content": [{"type": "text", "text": "x = 40"}]}]}))
+    db.commit()
+
+    res = client.as_user(teacher).post(
+        f"/api/questions/{q.id}/check-correctness", json={"provider": "gemini"}
+    )
+    assert res.status_code == 200, res.text
+
+    assert len(seen["question_images"]) == 1, "the question's diagram never reached the model"
+    assert seen["question_images"][0][0] == _photo_bytes()

@@ -585,10 +585,25 @@ async def check_correctness(request: Request, question_id: str, body: Correctnes
             if img and img.data:
                 answer_images.append((bytes(img.data), img.content_type or "image/png"))
 
-        question_text = extract_plain_text(question_nodes_by_box.get(box.id, [])) or fallback_question_text
+        question_nodes = question_nodes_by_box.get(box.id, [])
+        question_text = extract_plain_text(question_nodes) or fallback_question_text
+
+        # The question's own images, which used never to be sent.
+        #
+        # Only its text was passed, so a question built around a diagram
+        # arrived with the diagram missing — and the check dutifully
+        # reported the paper as unanswerable, describing a fault it had
+        # been handed rather than one the teacher had written.
+        question_images = []
+        for img_id in extract_image_ids(question_nodes or (q.content or {})):
+            img = db.query(UploadedImage).filter(UploadedImage.id == img_id).first()
+            if img and img.data:
+                question_images.append((bytes(img.data), img.content_type or "image/png"))
 
         try:
-            result = await provider.check_correctness(question_text, answer_text, answer_images)
+            result = await provider.check_correctness(
+                question_text, answer_text, answer_images, question_images
+            )
         except Exception as e:
             result = {
                 "ok": None,
