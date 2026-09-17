@@ -79,6 +79,19 @@ CORNER_MARKER_IDS = [0, 1, 2, 3]  # TL, TR, BL, BR
 # marker footprint (MARKER_MARGIN_PX + MARKER_SIZE_PX = 100), so the top
 # few lines of content rendered underneath the marker. Fixed by deriving
 # these from the marker geometry instead of a guessed constant.
+
+# A CSS pixel is 1/96 inch, always. The page here is laid out at
+# DEFAULT_DPI (150) so that one canonical pixel is one pixel of the scan
+# the extractor works in — which means a length authored against the
+# editor's own A4 page (794px wide, 96dpi) covers only 96/150 of the
+# paper it is meant to.
+#
+# It did. Body text set at 15px printed at 7.2pt, and the answer box
+# labels at 5.3pt. Everything inside the content area is therefore laid
+# out in editor pixels and zoomed up to canonical ones, so the sheet
+# comes out the size it looked in the editor.
+CSS_DPI = 96
+
 _MARKER_ZONE = settings.MARKER_MARGIN_PX + settings.MARKER_SIZE_PX  # marker's own footprint from the page edge
 _QR_SIZE = 72  # bumped up from 46 — at 46px the ~40-module QR payload this
                 # encodes worked out to ~1 canonical px/module, i.e. right at
@@ -457,13 +470,13 @@ body{margin:0}
 """
 
 
-def _measure(blocks: list[dict], content_w: int) -> list[dict]:
+def _measure(blocks: list[dict], content_w: int, zoom: float) -> list[dict]:
     from playwright.sync_api import sync_playwright
 
     fragments = "".join(f'<div data-idx="{i}">{b["html"]}</div>' for i, b in enumerate(blocks))
     html = f"""<!doctype html><html><head><meta charset="utf-8">
 <link rel="stylesheet" href="{KATEX_CSS}">
-<style>{_MEASURE_CSS} .measure{{width:{content_w}px}}</style></head>
+<style>{_MEASURE_CSS} .measure{{width:{content_w / zoom:.3f}px;zoom:{zoom}}}</style></head>
 <body><div class="measure">{fragments}</div>
 <script src="{KATEX_JS}"></script>
 <script src="{KATEX_AUTORENDER}"></script>
@@ -594,6 +607,10 @@ body{{margin:0}}
 .doc-page{{position:relative;width:{W}px;height:{H}px;box-sizing:border-box;overflow:hidden;background:#fff}}
 .doc-page + .doc-page{{break-before:page}}
 .content{{position:absolute;left:{L}px;top:{T}px;width:{CW}px;font-family:Georgia,'Times New Roman',serif}}
+/* Everything below is authored in editor pixels; the zoom converts them
+   to canonical ones. Position and size of .content itself stay
+   canonical, because the markers and QR codes around it are. */
+.content-zoom{{width:{CWZ}px;zoom:{Z}}}
 .content p{{margin:0 0 10px;font-size:15px;line-height:1.5;color:#111}}
 .content h1,.content h2,.content h3{{margin:14px 0 8px}}
 /* Stated rather than left to the browser's defaults, and kept in step
@@ -616,7 +633,7 @@ body{{margin:0}}
 /* Sits inside the bottom margin, clear of the content area and of the
    two lower corner markers, which the extractor needs unobstructed. */
 .page-number{{position:absolute;left:0;right:0;bottom:18px;text-align:center;
-  font-family:Georgia,'Times New Roman',serif;font-size:11px;color:#888}}
+  font-family:Georgia,'Times New Roman',serif;font-size:{PGNUM}px;color:#888}}
 """
 
 
@@ -647,7 +664,10 @@ def render_finalized_question(question: dict) -> dict:
     if not blocks:
         raise ValueError("Question has no content to render")
 
-    rects = _measure(blocks, content_w)
+    # Canonical pixels per editor pixel.
+    zoom = dpi / CSS_DPI
+
+    rects = _measure(blocks, content_w, zoom)
     page_of_block, answer_layout, page_count = _paginate(blocks, rects, usable_h)
 
     marker_uris = {mid: _aruco_data_uri(mid) for mid in CORNER_MARKER_IDS}
@@ -686,7 +706,7 @@ def render_finalized_question(question: dict) -> dict:
                 box_html = (
                     f'<div class="answer-box-node answer-box-segment" '
                     f'data-box-id="{bid}" data-part-idx="{seg_num}" data-page-idx="{seg_page}" '
-                    f'style="width:{info["width_percent"]}%;height:{seg_h:.0f}px;'
+                    f'style="width:{info["width_percent"]}%;height:{seg_h / zoom:.1f}px;'
                     f'min-height:unset;margin:0 0 10px 0;box-sizing:border-box;">'
                     f'<div class="ab-label">{label_text}</div>'
                     f'</div>'
@@ -719,10 +739,14 @@ def render_finalized_question(question: dict) -> dict:
         )
         pages_html.append(
             f'<div class="doc-page">{"".join(overlays)}'
-            f'<div class="content">{content_html}</div>{footer}</div>'
+            f'<div class="content"><div class="content-zoom">{content_html}</div></div>'
+            f'{footer}</div>'
         )
 
-    css = _PRINT_CSS_TEMPLATE.format(W=canvas_w, H=canvas_h, L=LEFT_MARGIN, T=TOP_MARGIN, CW=content_w)
+    css = _PRINT_CSS_TEMPLATE.format(
+        W=canvas_w, H=canvas_h, L=LEFT_MARGIN, T=TOP_MARGIN, CW=content_w,
+        CWZ=f"{content_w / zoom:.3f}", Z=zoom, PGNUM=round(11 * zoom),
+    )
     final_html = f"""<!doctype html><html><head><meta charset="utf-8">
 <link rel="stylesheet" href="{KATEX_CSS}">
 <style>{css}</style></head>
