@@ -23,7 +23,7 @@ from schemas import (
     GroupedAnswerBoxOut,
     AnswerPartOut,
 )
-from services.extractor import extract_page
+from services.extractor import assess_image, extract_page, identify_page
 from routers.questions import _question_to_dict
 from ratelimit import HEAVY_CPU_LIMIT, limiter
 from security import get_current_user
@@ -351,6 +351,12 @@ async def create_submission(
         p["page_index"]: p for p in ((sub.manifest or {}).get("pages", []) if sub else [])
     }
 
+    # Remembered before the fallback below overwrites it: an explicitly
+    # given page number is the student naming a page whose codes cannot
+    # be read, and it must not be quietly replaced by one read off the
+    # image.
+    explicit_page_index = page_index
+
     if page_index is None:
         page_index = max(pages_by_index) + 1 if pages_by_index else 0
 
@@ -395,20 +401,77 @@ async def create_submission(
         n_pages = len(page_images)
         if q.page_count:
             n_pages = min(n_pages, q.page_count)
+        # A whole document is either the right script or it isn't, so it
+        # is checked before any of it is stored. Someone uploading last
+        # term's paper, or a classmate's, should be told plainly rather
+        # than left with a submission full of empty boxes.
         for i in range(n_pages):
+            identity = identify_page(question_dict, page_images[i])
+            if identity["verdict"] == "wrong_paper":
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"Page {i + 1} of this document belongs to a different "
+                        "question paper. Check you are uploading the right script."
+                    ),
+                )
+
+        for i in range(n_pages):
+            # Pages within a document are usually in order, but they are
+            # not required to be: a scanner can reverse a stack, and a
+            # page put back the wrong way round should still land where
+            # it belongs.
+            identity = identify_page(question_dict, page_images[i])
+            target = identity["page_index"] if identity["verdict"] == "ok" else i
             try:
                 result = extract_page(
                     question=question_dict, image_bytes=page_images[i],
-                    modality=modality, page_index=i, submission_id=sub_id,
+                    modality=modality, page_index=target, submission_id=sub_id,
                 )
-                _store_page_data(db, sub_id, i, page_images[i], content_type or "image/png", result, question_dict)
-                pages_by_index[i] = _clean_page_result(result)
+                _store_page_data(db, sub_id, target, page_images[i], content_type or "image/png", result, question_dict)
+                pages_by_index[target] = _clean_page_result(result)
             except ValueError as e:
-                pages_by_index[i] = {
-                    "page_index": i, "markers_detected": "N/A", "transform_type": "none",
+                pages_by_index[target] = {
+                    "page_index": target, "markers_detected": "N/A", "transform_type": "none",
                     "crops": [], "image_resolution": None, "image_dpi": None, "error": str(e),
                 }
     else:
+        if modality != "tablet":
+            # Judge the photograph before doing anything with it. A
+            # blurred or unlit page yields crops from the wrong parts of
+            # the sheet, and saying so now is far better than marking
+            # whatever comes out.
+            quality = assess_image(raw_bytes)
+            if not quality["ok"]:
+                raise HTTPException(status_code=422, detail=quality["reason"])
+
+            # Ask the page which page it is, rather than trusting the
+            # order it was uploaded in. Photograph page three first and
+            # the old behaviour extracted it against page one's layout.
+            identity = identify_page(question_dict, raw_bytes)
+
+            if identity["verdict"] == "wrong_paper":
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "This page belongs to a different question paper. "
+                        "Check you are photographing the right script."
+                    ),
+                )
+            # "undetermined" means this server cannot read codes at all,
+            # which is not the student's problem: fall through to the
+            # arrival-order behaviour rather than refusing their work.
+            if identity["verdict"] == "unreadable" and explicit_page_index is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"{identity['detail']} Take it again, or say which page "
+                        "it is if the codes are damaged."
+                    ),
+                )
+            if identity["verdict"] == "ok" and explicit_page_index is None:
+                page_index = identity["page_index"]
+
         try:
             result = extract_page(
                 question=question_dict, image_bytes=raw_bytes,

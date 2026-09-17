@@ -585,6 +585,10 @@ body{{margin:0}}
 .ab-label{{font-size:11px;font-weight:bold;color:#888}}
 .question-image{{max-width:100%;display:block;margin:10px 0}}
 .marker-img,.qr-img{{position:absolute}}
+/* Sits inside the bottom margin, clear of the content area and of the
+   two lower corner markers, which the extractor needs unobstructed. */
+.page-number{{position:absolute;left:0;right:0;bottom:18px;text-align:center;
+  font-family:Georgia,'Times New Roman',serif;font-size:11px;color:#888}}
 """
 
 
@@ -675,7 +679,20 @@ def render_finalized_question(question: dict) -> dict:
     for pg_idx in range(page_count):
         content_html = "".join(page_fragments.get(pg_idx, []))
         overlays = [markers_html()] + page_qrs.get(pg_idx, [])
-        pages_html.append(f'<div class="doc-page">{"".join(overlays)}<div class="content">{content_html}</div></div>')
+        # A page number a person can read.
+        #
+        # The printed codes let the software identify a page, but they
+        # are small and a photograph can defeat them. When that happens
+        # the student is asked which page it is — and until now there was
+        # nothing on the sheet to answer with. It also lets anyone
+        # collating paper scripts put them back in order.
+        footer = (
+            f'<div class="page-number">Page {pg_idx + 1} of {page_count}</div>'
+        )
+        pages_html.append(
+            f'<div class="doc-page">{"".join(overlays)}'
+            f'<div class="content">{content_html}</div>{footer}</div>'
+        )
 
     css = _PRINT_CSS_TEMPLATE.format(W=canvas_w, H=canvas_h, L=LEFT_MARGIN, T=TOP_MARGIN, CW=content_w)
     final_html = f"""<!doctype html><html><head><meta charset="utf-8">

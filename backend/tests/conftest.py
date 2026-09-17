@@ -37,6 +37,31 @@ from models import User  # noqa: E402
 from security import get_current_user  # noqa: E402
 
 
+@pytest.fixture
+def pages_without_codes(monkeypatch):
+    """
+    Pretend the page codes cannot be read.
+
+    Uploads normally identify themselves from the QR printed beside each
+    answer box, and a photograph carrying none is refused so the student
+    can retake it. Tests about submission plumbing — appending, removing,
+    handing in, who may touch whose work — are not about identification
+    and would otherwise all have to carry a rendered page.
+
+    This selects the documented fallback: when codes cannot be read,
+    pages are taken in the order they arrive. `identify_page` is not
+    patched directly, so the real decision path still runs.
+    """
+    import services.extractor as extractor
+
+    # Cleared before patching, not after: by teardown the attribute is
+    # still the stand-in, which has no cache to clear. monkeypatch then
+    # restores the real function with an empty cache.
+    extractor._zbar_available.cache_clear()
+    monkeypatch.setattr(extractor, "_zbar_available", lambda: False)
+    yield
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _render_server():
     """

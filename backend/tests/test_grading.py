@@ -9,6 +9,31 @@ needs a live LLM.
 
 import pytest
 
+def _photo_bytes() -> bytes:
+    """
+    Bytes that are a real photograph as far as the upload path is
+    concerned.
+
+    Uploads are now judged before extraction — an unopenable or badly
+    blurred file is refused outright — so tests can no longer post the
+    string "not a real image" and expect it through. Random texture
+    gives a sharp, mid-brightness image that passes that check while
+    still carrying no markers, which keeps these tests about submission
+    plumbing rather than extraction.
+    """
+    import io
+
+    import numpy as np
+    from PIL import Image
+
+    rng = np.random.default_rng(1)
+    noise = rng.integers(0, 255, size=(240, 180, 3), dtype=np.uint8)
+    buf = io.BytesIO()
+    Image.fromarray(noise).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+
 from models import (
     AnswerBox,
     AnswerGrade,
@@ -868,7 +893,7 @@ def test_a_student_cannot_resubmit_once_marked(client, graded_setup, db, monkeyp
     res = client.as_user(student).post(
         "/api/submissions",
         data={"question_id": question_id, "modality": "photo"},
-        files={"image": ("page.png", io.BytesIO(b"not really a png"), "image/png")},
+        files={"image": ("page.png", io.BytesIO(_photo_bytes()), "image/png")},
     )
     assert res.status_code == 409
     assert "already been marked" in res.json()["detail"]
@@ -885,7 +910,7 @@ def test_a_teacher_may_still_upload_after_marking(client, graded_setup, db, monk
     res = client.as_user(teacher).post(
         "/api/submissions",
         data={"question_id": graded_setup["question"].id, "modality": "photo"},
-        files={"image": ("page.png", io.BytesIO(b"not really a png"), "image/png")},
+        files={"image": ("page.png", io.BytesIO(_photo_bytes()), "image/png")},
     )
     # Not blocked by the resubmission rule; the bad image fails later.
     assert res.status_code != 409
