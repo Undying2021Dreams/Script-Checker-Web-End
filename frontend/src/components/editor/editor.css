@@ -49,3 +49,34 @@
     break-inside: avoid;
   }
 }
+
+/* Lists.
+ *
+ * Tailwind's preflight resets every ul and ol to `list-style: none` with
+ * no padding, which it does so that navigation menus are not littered
+ * with bullets. Inside a document that is exactly wrong: the toolbar's
+ * list buttons worked and produced real list nodes, but the result was
+ * indistinguishable from ordinary paragraphs, so the buttons looked
+ * broken.
+ *
+ * Kept in step with the print stylesheet in doc_renderer, or a list
+ * would sit differently on the printed page than in the editor that
+ * made it. */
+.doc-page .ProseMirror ul,
+.doc-page .ProseMirror ol {
+  margin: 0 0 10px 0;
+  padding-left: 26px;
+}
+.doc-page .ProseMirror ul { list-style: disc; }
+.doc-page .ProseMirror ol { list-style: decimal; }
+.doc-page .ProseMirror ul ul { list-style: circle; }
+.doc-page .ProseMirror ul ul ul { list-style: square; }
+.doc-page .ProseMirror ol ol { list-style: lower-alpha; }
+.doc-page .ProseMirror ol ol ol { list-style: lower-roman; }
+.doc-page .ProseMirror li { margin: 2px 0; }
+.doc-page .ProseMirror li > ul,
+.doc-page .ProseMirror li > ol { margin-bottom: 0; }
+
+/* Tiptap wraps each list item's text in a paragraph, which would
+   otherwise inherit the 10px paragraph gap and space the bullets out. */
+.doc-page .ProseMirror li > p { margin: 0; }
