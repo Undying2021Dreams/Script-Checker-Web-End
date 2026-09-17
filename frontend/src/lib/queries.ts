@@ -440,3 +440,33 @@ export function useHandInSubmission(submissionId: string) {
     },
   })
 }
+
+export interface SuggestedMark {
+  answer_box_id: string
+  label: string
+  points: number | null
+  // What the marking scheme looks like it adds up to. A suggestion: it
+  // used to be applied silently and got real schemes wrong in ways only
+  // visible after a mark had been given.
+  suggested: number | null
+}
+
+export function useSuggestedMarks(questionId: string, enabled: boolean) {
+  return useQuery({
+    enabled,
+    queryKey: ['suggested-marks', questionId],
+    queryFn: () => apiFetch<SuggestedMark[]>(`/questions/${questionId}/suggested-marks`),
+  })
+}
+
+export function useSetPaperTotal(questionId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (total: number | null) =>
+      apiFetch<Question>(`/questions/${questionId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ total_marks_declared: total }),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['question', questionId] }),
+  })
+}

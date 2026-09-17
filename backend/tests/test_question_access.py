@@ -857,3 +857,96 @@ def test_a_page_from_another_paper_is_refused(client, db, make_user):
     )
     assert res.status_code == 422, res.text
     assert "different question paper" in res.json()["detail"]
+
+
+# ── Marks are stated, not inferred ──────────────────────────────────
+
+def _draft_with_boxes(client, db, teacher, boxes, scheme="", code="MKS001"):
+    """A draft paper with the given answer boxes and one marking scheme."""
+    from models import Course
+
+    course = Course(title="Marks", join_code=code, teacher_id=teacher.id)
+    db.add(course)
+    db.commit()
+
+    qid = client.as_user(teacher).post(
+        "/api/questions", params={"course_id": course.id}, json={}
+    ).json()["question_id"]
+
+    # The scheme lives inside the groundTruthBox node: the server reads
+    # each box's content out of the document rather than being sent it
+    # separately.
+    content = {"type": "doc", "content": [
+        {"type": "paragraph", "content": [{"type": "text", "text": "Q1) Solve it"}]},
+        {"type": "groundTruthBox", "attrs": {"id": "gt-1"}, "content": [
+            {"type": "paragraph", "content": [{"type": "text", "text": scheme}]},
+        ]},
+        *[{"type": "answerBox", "attrs": {"id": b["id"], "label": b["label"]}} for b in boxes],
+    ]}
+    client.as_user(teacher).put(f"/api/questions/{qid}/blocks", json={
+        "content": content,
+        "answer_boxes": boxes,
+        "ground_truth_boxes": [{"id": "gt-1", "label": ""}],
+    })
+    return qid
+
+
+def test_finalizing_refuses_a_part_with_no_marks(client, db, make_user):
+    """
+    Marks decide grades, so they are the teacher's to state. Reading them
+    out of the marking scheme got three real schemes wrong, and every
+    time the wrong number was only noticed after a mark had been given —
+    a wrong total does not look wrong, it looks like a number.
+    """
+    teacher = make_user(role="teacher")
+    qid = _draft_with_boxes(
+        client, db, teacher,
+        [{"id": "b1", "label": "a", "points": 5}, {"id": "b2", "label": "b"}],
+        code="MKS002",
+    )
+
+    res = client.as_user(teacher).post(f"/api/questions/{qid}/finalize")
+    assert res.status_code == 409, res.text
+    assert "no marks yet" in res.json()["detail"]
+    assert "b" in res.json()["detail"], "should name the part that is missing them"
+
+
+def test_a_declared_paper_total_must_match_the_parts(client, db, make_user):
+    """
+    The one error per-part marks cannot catch between them: a part left
+    out altogether. Each part can be right and the paper still be wrong.
+    """
+    teacher = make_user(role="teacher")
+    qid = _draft_with_boxes(
+        client, db, teacher,
+        [{"id": "b1", "label": "a", "points": 5}, {"id": "b2", "label": "b", "points": 5}],
+        code="MKS003",
+    )
+    client.as_user(teacher).patch(f"/api/questions/{qid}", json={"total_marks_declared": 15})
+
+    res = client.as_user(teacher).post(f"/api/questions/{qid}/finalize")
+    assert res.status_code == 409, res.text
+    assert "add up to 10" in res.json()["detail"]
+    assert "out of 15" in res.json()["detail"]
+
+    # Correct it and the paper finalizes.
+    client.as_user(teacher).patch(f"/api/questions/{qid}", json={"total_marks_declared": 10})
+    assert client.as_user(teacher).post(f"/api/questions/{qid}/finalize").status_code == 200
+
+
+def test_the_scheme_suggests_marks_without_applying_them(client, db, make_user):
+    """The parser's new job: advise, and let the teacher decide."""
+    teacher = make_user(role="teacher")
+    qid = _draft_with_boxes(
+        client, db, teacher,
+        [{"id": "b1", "label": "a", "points": 3}],
+        scheme="For the method - 4 marks. For the answer - 6 marks. Max marks - 10",
+        code="MKS004",
+    )
+
+    body = client.as_user(teacher).get(f"/api/questions/{qid}/suggested-marks").json()
+    assert body == [{"answer_box_id": "b1", "label": "a", "points": 3, "suggested": 10}]
+
+    # Reading it changed nothing.
+    from models import AnswerBox
+    assert db.query(AnswerBox).filter(AnswerBox.id == "b1").one().points == 3

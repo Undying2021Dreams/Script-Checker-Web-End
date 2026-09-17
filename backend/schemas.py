@@ -100,6 +100,10 @@ class SubmissionSummary(BaseModel):
 
 class QuestionMetaUpdate(BaseModel):
     title: str | None = Field(default=None, max_length=200)
+    # Optional. Checked against the sum of the parts at finalize, which
+    # is the one error the parts cannot catch between them: a part left
+    # out altogether.
+    total_marks_declared: int | None = Field(default=None, ge=0, le=10000)
 
 
 class StudentAssignment(BaseModel):
@@ -259,6 +263,7 @@ class QuestionOut(BaseModel):
     page_h_px: int | None = None
     page_count: int | None = None
     derived_from: str | None = None
+    total_marks_declared: int | None = None
     created_at: str
     finalized_at: str | None = None
 

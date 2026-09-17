@@ -62,6 +62,11 @@ export interface Question {
   answer_boxes: AnswerBox[]
   ground_truth_boxes: GroundTruthBox[]
   page_count: number | null
+  // Optional cross-check the teacher can set: what the whole paper is
+  // out of. Validated against the sum of the parts at finalize, which
+  // catches the one error the parts cannot catch between them — a part
+  // left out altogether.
+  total_marks_declared: number | null
   created_at: string
   finalized_at: string | null
 }
