@@ -149,6 +149,40 @@ def _get_question_for_submission(question_id: str, db: Session, user: User) -> Q
     return q
 
 
+def _is_own_work(course_id: str, db: Session, user: User) -> bool:
+    """
+    Whether this upload is the uploader's own answer, or a script they
+    are handling on someone else's behalf.
+
+    Decided by enrolment, because a role is a property of a person *and
+    a course*: whoever teaches Numerical Methods may well be taking
+    Compilers, and the account that runs one course is an ordinary
+    student in another.
+
+    This used to ask `user.role == "student"` — one global label — so a
+    teacher of any course who sat another one had their answer filed as
+    nobody's. Their own script then came back 404 from the endpoint that
+    reads it, their page said "No pages yet" over work that had uploaded
+    perfectly well, and it sat in the teacher's list under "Uploaded by
+    teacher".
+
+    Reading and writing now agree. The list endpoint has always decided
+    this by course; only the two places that *create* a submission
+    disagreed with it.
+    """
+    if user.role == "admin":
+        return False
+    course = db.query(Course).filter(Course.id == course_id).first()
+    if course is None or course.teacher_id == user.id:
+        return False
+    return (
+        db.query(Enrollment.id)
+        .filter(Enrollment.course_id == course_id, Enrollment.student_id == user.id)
+        .first()
+        is not None
+    )
+
+
 def _get_submission_or_404(submission_id: str, db: Session, user: User) -> Submission:
     """A submission the caller may read: their own, or one in a course they teach."""
     sub = db.query(Submission).filter(Submission.id == submission_id).first()
@@ -364,7 +398,7 @@ async def create_submission(
                 status_code=400,
                 detail=f"Submission {submission_id} belongs to a different question ({sub.question_id}).",
             )
-    elif user.role != "admin":
+    elif _is_own_work(q.course_id, db, user):
         # No id given: add to the script this student already has open,
         # if there is one.
         #
@@ -415,8 +449,8 @@ async def create_submission(
             id=sub_id,
             question_id=question_id,
             # A teacher uploading a scanned stack isn't its author, so only
-            # attribute the submission when a student submits their own.
-            student_id=user.id if user.role == "student" else None,
+            # attribute the submission when someone submits their own.
+            student_id=user.id if _is_own_work(q.course_id, db, user) else None,
             modality=modality,
         )
         db.add(sub)
@@ -614,7 +648,7 @@ def create_tablet_submission(body: TabletSubmission, page_index: int = 0, user: 
     submission = Submission(
         id=sub_id,
         question_id=body.question_id,
-        student_id=user.id if user.role == "student" else None,
+        student_id=user.id if _is_own_work(q.course_id, db, user) else None,
         modality="tablet",
         manifest=manifest,
     )
