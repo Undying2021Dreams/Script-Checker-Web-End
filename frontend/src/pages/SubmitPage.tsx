@@ -24,14 +24,17 @@ import {
   useUploadSubmission,
 } from '@/lib/queries'
 
-/** A photograph taken but not yet sent. */
+/** Something chosen but not yet sent. */
 type Queued = {
   key: string
   file: File
-  /** Shown immediately, from the phone's own copy. */
-  preview: string
-  /** 1-based, as the student said it. */
-  pageNumber: number
+  /** One page, or a document that contains all of them. */
+  kind: 'page' | 'document'
+  /** Shown immediately, from the device's own copy. Pages only. */
+  preview?: string
+  /** 1-based, as the student said it. Pages only — a document's pages
+      identify themselves from the codes printed on them. */
+  pageNumber?: number
   status: 'waiting' | 'uploading' | 'failed'
   error?: string
 }
@@ -78,7 +81,8 @@ export function SubmitPage() {
   const [pageNumber, setPageNumber] = useState('')
 
   const cameraRef = useRef<HTMLInputElement>(null)
-  const fileRef = useRef<HTMLInputElement>(null)
+  const imageRef = useRef<HTMLInputElement>(null)
+  const pdfRef = useRef<HTMLInputElement>(null)
 
   const upload = useUploadSubmission(questionId)
   const { data, isLoading } = useSubmissionPages(submissionId)
@@ -93,13 +97,19 @@ export function SubmitPage() {
   const suggestedPage = Math.max(
     0,
     ...pages.map((p) => p.page_index + 1),
-    ...queue.map((q) => q.pageNumber),
+    ...queue.flatMap((q) => (q.pageNumber != null ? [q.pageNumber] : [])),
   ) + 1
 
-  const chooseFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const clearInputs = () => {
+    for (const ref of [cameraRef, imageRef, pdfRef]) {
+      if (ref.current) ref.current.value = ''
+    }
+  }
+
+  /** A camera shot, or an image file — either way, one page. */
+  const choosePages = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? [])
-    if (cameraRef.current) cameraRef.current.value = ''
-    if (fileRef.current) fileRef.current.value = ''
+    clearInputs()
     if (files.length === 0) return
 
     // Asked here, while the photograph is in hand, rather than after a
@@ -108,6 +118,16 @@ export function SubmitPage() {
     // to ask for it only added a round trip to every page.
     setPageNumber(String(suggestedPage))
     setAsking({ files, preview: URL.createObjectURL(files[0]) })
+  }
+
+  /** A whole script in one file. Nothing to ask: every page carries the
+      codes that say which page it is, and the server refuses the
+      document outright if they name a different paper. */
+  const choosePdf = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = (e.target.files ?? [])[0]
+    clearInputs()
+    if (!file) return
+    setQueue((q) => [...q, { key: `q${nextKey++}`, file, kind: 'document', status: 'waiting' }])
   }
 
   const enqueue = () => {
@@ -122,6 +142,7 @@ export function SubmitPage() {
       ...asking.files.map((file, i) => ({
         key: `q${nextKey++}`,
         file,
+        kind: 'page' as const,
         preview: i === 0 ? asking.preview : URL.createObjectURL(file),
         pageNumber: first + i,
         status: 'waiting' as const,
@@ -140,7 +161,7 @@ export function SubmitPage() {
   const drop = (key: string) =>
     setQueue((q) => {
       const item = q.find((it) => it.key === key)
-      if (item) URL.revokeObjectURL(item.preview)
+      if (item?.preview) URL.revokeObjectURL(item.preview)
       return q.filter((it) => it.key !== key)
     })
 
@@ -157,20 +178,25 @@ export function SubmitPage() {
       try {
         const result = await upload.mutateAsync({
           file: next.file,
-          modality: 'photo',
+          // A document is already flat and evenly lit, so it is not
+          // treated as a photograph: no straightening, no relighting,
+          // and an affine fit rather than a perspective one.
+          modality: next.kind === 'document' ? 'scanner' : 'photo',
           submissionId: submissionIdRef.current ?? undefined,
-          pageIndexHint: next.pageNumber - 1,
+          pageIndexHint: next.pageNumber != null ? next.pageNumber - 1 : undefined,
         })
         submissionIdRef.current = result.submission_id
         setSubmissionId(result.submission_id)
         setQueue((q) => q.filter((it) => it.key !== next.key))
-        URL.revokeObjectURL(next.preview)
+        if (next.preview) URL.revokeObjectURL(next.preview)
       } catch (err) {
         const message = (err as Error).message
         setQueue((q) =>
           q.map((it) => (it.key === next.key ? { ...it, status: 'failed', error: message } : it)),
         )
-        toast.error(`Page ${next.pageNumber}: ${message}`)
+        toast.error(
+          next.kind === 'document' ? `${next.file.name}: ${message}` : `Page ${next.pageNumber}: ${message}`,
+        )
       } finally {
         sending.current = false
         setTick((t) => t + 1)
@@ -208,40 +234,67 @@ export function SubmitPage() {
       />
 
       <div className="flex flex-wrap gap-2">
-        {/* Never disabled while an upload runs. Waiting for the network
-            between pages was the whole complaint. */}
+        {/* Three ways in, each doing one thing.
+
+            "Take a photo" asks the camera for a picture. On a phone
+            that opens the camera; on a desktop the browser ignores the
+            request and offers the file picker instead, which is why
+            "Upload an image" exists as well — on a desktop it is the
+            one that means what it says, and on a phone it reaches the
+            gallery rather than the camera.
+
+            None of them are disabled while an upload runs. Waiting for
+            the network between pages was the whole complaint. */}
         <Button onClick={() => cameraRef.current?.click()}>Take a photo</Button>
-        <Button variant="outline" onClick={() => fileRef.current?.click()}>
-          Choose files
+        <Button variant="outline" onClick={() => imageRef.current?.click()}>
+          Upload an image
+        </Button>
+        <Button variant="outline" onClick={() => pdfRef.current?.click()}>
+          Upload a PDF
         </Button>
         {waiting > 0 && (
           <StatusPill tone="info">
             <Pending>
-              Sending {waiting} page{waiting === 1 ? '' : 's'}
+              Sending {waiting} item{waiting === 1 ? '' : 's'}
             </Pending>
           </StatusPill>
         )}
 
-        {/* One photo at a time from the camera; as many as you like from
-            the picker. `capture` hands back a single image and can stop
-            a phone offering the library at all, so they are separate. */}
+        {/* `capture` hands back a single image and can stop a phone
+            offering the gallery at all, so the camera gets an input of
+            its own. */}
         <input
           ref={cameraRef}
           type="file"
           accept="image/jpeg,image/png,image/webp"
           capture="environment"
-          onChange={chooseFiles}
+          onChange={choosePages}
           className="hidden"
         />
         <input
-          ref={fileRef}
+          ref={imageRef}
           type="file"
-          accept="image/jpeg,image/png,image/webp,application/pdf"
+          accept="image/jpeg,image/png,image/webp"
           multiple
-          onChange={chooseFiles}
+          onChange={choosePages}
+          className="hidden"
+        />
+        {/* One document, and only a PDF: it is the whole script, so
+            there is nothing to number and nothing to combine. */}
+        <input
+          ref={pdfRef}
+          type="file"
+          accept="application/pdf"
+          onChange={choosePdf}
           className="hidden"
         />
       </div>
+
+      <p className="text-xs text-muted-foreground">
+        Photograph or upload one page at a time, or upload a single PDF holding the whole
+        script. A PDF's pages sort themselves out from the codes printed on them, so it does
+        not ask you anything.
+      </p>
 
       {/* Asked before sending, not after failing. The number is only
           used if the printed codes cannot be read, so a wrong guess on
@@ -302,16 +355,27 @@ export function SubmitPage() {
             network has caught up with it. */}
         {queue.map((item) => (
           <div key={item.key} className="space-y-2">
-            <PaperSurface
-              kind="student"
-              caption={`Page ${item.pageNumber}`}
-            >
-              <img
-                src={item.preview}
-                alt={`Page ${item.pageNumber} of your answer`}
-                className="max-h-[28rem] w-full object-contain opacity-70"
-              />
-            </PaperSurface>
+            {/* A document has no single picture to show, and its pages
+                do not have numbers yet — the server reads those off the
+                codes once it opens the file. So it appears by name. */}
+            {item.kind === 'document' ? (
+              <PaperSurface kind="page" caption="Whole script">
+                <div className="px-3 py-4 text-sm">
+                  <span className="font-medium">{item.file.name}</span>
+                  <span className="ml-2 text-muted-foreground">
+                    {Math.round(item.file.size / 1024)} KB
+                  </span>
+                </div>
+              </PaperSurface>
+            ) : (
+              <PaperSurface kind="student" caption={`Page ${item.pageNumber}`}>
+                <img
+                  src={item.preview}
+                  alt={`Page ${item.pageNumber} of your answer`}
+                  className="max-h-[28rem] w-full object-contain opacity-70"
+                />
+              </PaperSurface>
+            )}
             <div className="flex items-center gap-2 px-1">
               {item.status === 'failed' ? (
                 <StatusPill tone="danger">{item.error || "Couldn't be sent"}</StatusPill>

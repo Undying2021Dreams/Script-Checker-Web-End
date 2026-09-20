@@ -407,8 +407,18 @@ async def create_submission(
 
     if page_images is not None:
         n_pages = len(page_images)
-        if q.page_count:
-            n_pages = min(n_pages, q.page_count)
+        if q.page_count and n_pages > q.page_count:
+            # Silently dropping the extra pages is how a document with a
+            # cover sheet in front of it used to lose its last answer:
+            # everything shifted by one and the tail fell off the end.
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"This document has {n_pages} pages, but the paper is "
+                    f"{q.page_count}. Upload just the answer sheets, with no "
+                    "cover page."
+                ),
+            )
         # A whole document is either the right script or it isn't, so it
         # is checked before any of it is stored. Someone uploading last
         # term's paper, or a classmate's, should be told plainly rather

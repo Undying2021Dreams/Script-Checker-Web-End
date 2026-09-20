@@ -12,6 +12,7 @@ grey rather than white. Afterwards, 2%.
 """
 
 import io
+import uuid
 
 import cv2
 import numpy as np
@@ -186,3 +187,111 @@ def test_a_teacher_can_discard_a_script_and_a_student_cannot(client, course, db,
     assert db.query(Submission).filter(Submission.id == sub_id).count() == 0
     assert db.query(SubmissionImage).filter(SubmissionImage.submission_id == sub_id).count() == 0
     assert db.query(CropImage).filter(CropImage.submission_id == sub_id).count() == 0
+
+
+def _multi_page_paper(client, course):
+    """A finalized paper that runs to more than one sheet.
+
+    Answer box ids are unique across the whole database, so each call
+    mints its own — two of these exist side by side in one test.
+    """
+    tag = uuid.uuid4().hex[:8]
+    boxes = [{"id": f"{tag}-a", "label": "a", "points": 5},
+             {"id": f"{tag}-b", "label": "b", "points": 5}]
+    content = {
+        "type": "doc",
+        "content": [
+            {"type": "paragraph", "content": [{"type": "text", "text": "Question one."}]},
+            *[{"type": "answerBox", "attrs": {**b, "minHeight": 1400}} for b in boxes],
+        ],
+    }
+    qid = client.as_user(course.teacher).post(
+        "/api/questions", params={"course_id": course.id}, json={}
+    ).json()["question_id"]
+    client.as_user(course.teacher).put(
+        f"/api/questions/{qid}/blocks",
+        json={"content": content, "answer_boxes": boxes, "ground_truth_boxes": []},
+    )
+    finalized = client.as_user(course.teacher).post(f"/api/questions/{qid}/finalize")
+    assert finalized.status_code == 200, finalized.text
+    pages = client.as_user(course.teacher).get(f"/api/questions/{qid}").json()["page_count"]
+    assert pages > 1, f"this paper was supposed to run to several sheets, got {pages}"
+    return qid, pages
+
+
+def test_a_whole_pdf_is_accepted_without_being_told_any_page_numbers(client, course, db, make_user):
+    """
+    A PDF is the whole script in one file. Every page carries the codes
+    that say which page it is, so there is nothing to ask the student —
+    which is the difference from a photograph, where those codes rarely
+    survive.
+    """
+    student = make_user()
+    qid, page_count = _multi_page_paper(client, course)
+    db.add(Enrollment(course_id=course.id, student_id=student.id))
+    db.commit()
+
+    pdf = client.as_user(course.teacher).get(f"/api/questions/{qid}/pdf").content
+    res = client.as_user(student).post(
+        "/api/submissions",
+        data={"question_id": qid, "modality": "scanner"},
+        files={"image": ("script.pdf", pdf, "application/pdf")},
+    )
+    assert res.status_code == 200, res.text
+    assert sorted(p["page_index"] for p in res.json()["pages"]) == list(range(page_count))
+
+
+def test_a_pdf_of_the_wrong_paper_is_refused_by_name(client, course, db, make_user):
+    from services import extractor
+
+    if not extractor._zbar_available():
+        pytest.skip("no zbar here, so no page can say which paper it belongs to")
+
+    student = make_user()
+    mine, _ = _multi_page_paper(client, course)
+    theirs, _ = _multi_page_paper(client, course)
+    db.add(Enrollment(course_id=course.id, student_id=student.id))
+    db.commit()
+
+    other_pdf = client.as_user(course.teacher).get(f"/api/questions/{theirs}/pdf").content
+    res = client.as_user(student).post(
+        "/api/submissions",
+        data={"question_id": mine, "modality": "scanner"},
+        files={"image": ("script.pdf", other_pdf, "application/pdf")},
+    )
+    assert res.status_code == 422, res.text
+    assert "different" in res.json()["detail"].lower(), res.json()
+
+    # And nothing of it was kept.
+    from models import Submission
+    assert db.query(Submission).filter(Submission.student_id == student.id).count() == 0
+
+
+def test_a_pdf_longer_than_the_paper_is_refused_rather_than_trimmed(client, course, db, make_user):
+    """
+    The extra pages used to be dropped silently. A document with a cover
+    sheet in front of it then shifted by one and lost its last answer
+    off the end, with nothing said about it.
+    """
+    student = make_user()
+    qid, page_count = _multi_page_paper(client, course)
+    db.add(Enrollment(course_id=course.id, student_id=student.id))
+    db.commit()
+
+    pdf = client.as_user(course.teacher).get(f"/api/questions/{qid}/pdf").content
+    pages = [p.convert("RGB") for p in convert_from_bytes(pdf, dpi=120, fmt="png")]
+    assert len(pages) == page_count
+
+    # One sheet more than the paper has, as a cover page would make it.
+    # Built with Pillow rather than a PDF library, because this is the
+    # only place in the project that would need one.
+    longer = io.BytesIO()
+    pages[0].save(longer, format="PDF", save_all=True, append_images=pages)
+
+    res = client.as_user(student).post(
+        "/api/submissions",
+        data={"question_id": qid, "modality": "scanner"},
+        files={"image": ("script.pdf", longer.getvalue(), "application/pdf")},
+    )
+    assert res.status_code == 422, res.text
+    assert "pages" in res.json()["detail"].lower(), res.json()
