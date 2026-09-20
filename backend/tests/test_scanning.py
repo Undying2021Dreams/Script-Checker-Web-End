@@ -19,7 +19,7 @@ import numpy as np
 import pytest
 from pdf2image import convert_from_bytes
 
-from models import Course, Enrollment
+from models import Course, Enrollment, Submission
 
 
 @pytest.fixture
@@ -31,6 +31,13 @@ def course(db, make_user):
     db.refresh(course)
     course.teacher = teacher
     return course
+
+
+def _photo_bytes() -> bytes:
+    """A small noisy PNG — enough that the quality gate sees a photo
+    rather than random bytes."""
+    noise = np.random.default_rng(7).integers(0, 255, (400, 300, 3), dtype=np.uint8)
+    return cv2.imencode(".png", noise)[1].tobytes()
 
 
 def _finalized_paper(client, course):
@@ -330,3 +337,58 @@ def test_an_oversized_pdf_page_is_rasterised_down_rather_than_whole():
     )
     # Something unreadable must not stop an upload; it falls back.
     assert _pdf_page_dpi(b"not a pdf at all") > 0
+
+
+def test_a_teacher_of_one_course_submitting_to_another_owns_their_own_answer(
+    client, course, db, make_user, pages_without_codes
+):
+    """
+    A role belongs to a person *and a course*.
+
+    Whoever teaches Numerical Methods may well be sitting Compilers, and
+    the account that runs one course is an ordinary student in another.
+    Deciding this from `user.role` — one global label — filed their
+    answer as nobody's: the page they submitted from asked for it back
+    and got a 404, showed "No pages yet" over work that had uploaded
+    perfectly well, and their teacher saw it listed as "Uploaded by
+    teacher".
+
+    Reading already decided this by course; only creating a submission
+    disagreed.
+    """
+    # Teaches something, somewhere. Enrolled here as a student.
+    visitor = make_user(role="teacher")
+    db.add(Enrollment(course_id=course.id, student_id=visitor.id))
+    db.commit()
+
+    qid = _finalized_paper(client, course)
+    res = client.as_user(visitor).post(
+        "/api/submissions",
+        data={"question_id": qid, "modality": "photo", "page_index_hint": "0"},
+        files={"image": ("page.jpg", _photo_bytes(), "image/jpeg")},
+    )
+    assert res.status_code == 200, res.text
+    sub_id = res.json()["submission_id"]
+
+    # Theirs, and they can read it back — this is the 404 the console showed.
+    stored = db.query(Submission).filter(Submission.id == sub_id).one()
+    assert stored.student_id == visitor.id, "the answer was filed as nobody's"
+    assert client.as_user(visitor).get(f"/api/submissions/{sub_id}").status_code == 200
+
+    # And a second page joins the same script rather than starting another.
+    again = client.as_user(visitor).post(
+        "/api/submissions",
+        data={"question_id": qid, "modality": "photo", "page_index_hint": "1"},
+        files={"image": ("page2.jpg", _photo_bytes(), "image/jpeg")},
+    )
+    assert again.json()["submission_id"] == sub_id, "a second page began a second script"
+
+    # The teacher of this course still uploads a stack as nobody's work.
+    mine = client.as_user(course.teacher).post(
+        "/api/submissions",
+        data={"question_id": qid, "modality": "photo", "page_index_hint": "0"},
+        files={"image": ("stack.jpg", _photo_bytes(), "image/jpeg")},
+    )
+    assert mine.status_code == 200, mine.text
+    theirs = db.query(Submission).filter(Submission.id == mine.json()["submission_id"]).one()
+    assert theirs.student_id is None
