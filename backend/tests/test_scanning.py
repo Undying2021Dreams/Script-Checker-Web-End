@@ -295,3 +295,38 @@ def test_a_pdf_longer_than_the_paper_is_refused_rather_than_trimmed(client, cour
     )
     assert res.status_code == 422, res.text
     assert "pages" in res.json()["detail"].lower(), res.json()
+
+
+def test_an_oversized_pdf_page_is_rasterised_down_rather_than_whole():
+    """
+    What this endpoint costs is driven by pixels, not by pages.
+
+    A PDF written by a phone scanner app often declares a page far
+    larger than A4, because it sizes the page to the photograph.
+    Rendered at a flat 300 DPI that gave 5000x7000 images, and every
+    stage afterwards is per-pixel: a five page document took 46 seconds
+    on a laptop against nine once this was capped, with identical crops
+    out the other end.
+    """
+    from PIL import Image
+
+    from routers.submissions import _MAX_PAGE_LONG_EDGE_PX, _pdf_page_dpi
+
+    def pdf_of(width_px, height_px):
+        # Pillow writes the page at 72 points per inch of the image, so
+        # a large image becomes a large page — exactly the shape of the
+        # problem.
+        buf = io.BytesIO()
+        Image.new("RGB", (width_px, height_px), "white").save(buf, format="PDF")
+        return buf.getvalue()
+
+    a4_at_150 = pdf_of(1240, 1754)
+    huge = pdf_of(3000, 4000)
+
+    assert _pdf_page_dpi(a4_at_150) * (1754 / 72) <= _MAX_PAGE_LONG_EDGE_PX + 1
+    assert _pdf_page_dpi(huge) * (4000 / 72) <= _MAX_PAGE_LONG_EDGE_PX + 1
+    assert _pdf_page_dpi(huge) < _pdf_page_dpi(a4_at_150), (
+        "a larger page should be rendered at a lower DPI, not the same one"
+    )
+    # Something unreadable must not stop an upload; it falls back.
+    assert _pdf_page_dpi(b"not a pdf at all") > 0

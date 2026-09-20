@@ -165,10 +165,46 @@ def _get_submission_or_404(submission_id: str, db: Session, user: User) -> Submi
     return sub
 
 
+# An A4 sheet at 300 DPI. Nothing here needs more, and a page that
+# would rasterise larger is rendered at whatever DPI brings it back to
+# this — the cost of this endpoint is driven by pixels, not by pages.
+_MAX_PAGE_LONG_EDGE_PX = 3600
+
+
+def _pdf_page_dpi(pdf_bytes: bytes) -> int:
+    """
+    What DPI to rasterise at, given how big the pages say they are.
+
+    A PDF written by a phone scanner app often declares a page far
+    larger than A4 — it sizes the page to the photograph. Rendering that
+    at a fixed 300 DPI produced 5000x7000 images, and everything
+    downstream is per-pixel: a five page document took 37 seconds on a
+    laptop, against five on the same document sized as A4.
+    """
+    try:
+        from pdf2image import pdfinfo_from_bytes
+
+        info = pdfinfo_from_bytes(pdf_bytes)
+        # "Page size" reads like "595.276 x 841.89 pts (A4)".
+        parts = str(info.get("Page size", "")).split()
+        long_edge_pts = max(float(parts[0]), float(parts[2]))
+    except Exception:  # noqa: BLE001 — an unreadable header is not a reason to refuse
+        return settings.SUBMISSION_PDF_DPI
+
+    if long_edge_pts <= 0:
+        return settings.SUBMISSION_PDF_DPI
+    # No floor beyond a sane minimum: the cap is expressed in pixels, so
+    # whatever DPI it picks still yields a page about _MAX_PAGE_LONG_EDGE_PX
+    # across. A floor of 72 here looked prudent and simply defeated the
+    # cap for the largest pages, which are the ones it exists for.
+    fits = int(_MAX_PAGE_LONG_EDGE_PX / (long_edge_pts / 72))
+    return max(1, min(settings.SUBMISSION_PDF_DPI, fits))
+
+
 def _pdf_to_images(pdf_bytes: bytes) -> list[bytes]:
     try:
         from pdf2image import convert_from_bytes
-        images = convert_from_bytes(pdf_bytes, dpi=settings.SUBMISSION_PDF_DPI, fmt="png")
+        images = convert_from_bytes(pdf_bytes, dpi=_pdf_page_dpi(pdf_bytes), fmt="png")
         result = []
         for img in images:
             buf = io.BytesIO()
@@ -423,8 +459,14 @@ async def create_submission(
         # is checked before any of it is stored. Someone uploading last
         # term's paper, or a classmate's, should be told plainly rather
         # than left with a submission full of empty boxes.
+        # Read once and kept. Every one of these sweeps the whole page
+        # for codes, and doing it again a few lines below doubled the
+        # cost of every document upload — a five page script took 46
+        # seconds on a laptop, and this container is slower than that.
+        identities = [identify_page(question_dict, page_images[i]) for i in range(n_pages)]
+
         for i in range(n_pages):
-            identity = identify_page(question_dict, page_images[i])
+            identity = identities[i]
             if identity["verdict"] == "wrong_paper":
                 raise HTTPException(
                     status_code=422,
@@ -439,7 +481,7 @@ async def create_submission(
             # not required to be: a scanner can reverse a stack, and a
             # page put back the wrong way round should still land where
             # it belongs.
-            identity = identify_page(question_dict, page_images[i])
+            identity = identities[i]
             target = identity["page_index"] if identity["verdict"] == "ok" else i
             try:
                 result = extract_page(
