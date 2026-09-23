@@ -1,12 +1,22 @@
 import secrets
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import AnswerGrade, Course, Enrollment, Question, Submission, User
+from models import (
+    AnswerGrade,
+    Course,
+    Enrollment,
+    EnrollmentRequest,
+    Question,
+    Submission,
+    User,
+)
 from schemas import (
+    EnrollmentRequestOut,
     LeaderboardEntry,
     LeaderboardOut,
     CourseCreate,
@@ -17,6 +27,7 @@ from schemas import (
 )
 from ratelimit import JOIN_LIMIT, limiter
 from security import get_current_user, may_create_courses, require_teacher
+from services.notify import notify
 
 router = APIRouter(prefix="/courses", tags=["courses"])
 
@@ -141,7 +152,7 @@ def list_my_courses(
 def search_courses(
     q: str = Query(min_length=1, max_length=100),
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),  # noqa: ARG001 — sign-in required to search
+    user: User = Depends(get_current_user),
 ):
     """
     Find a course by title, or by its teacher's name/email.
@@ -173,9 +184,39 @@ def search_courses(
             title=c.title,
             teacher_name=c.teacher.display_name,
             student_count=counts.get(c.id, 0),
+            my_status=_my_status(c, db, user),
         )
         for c in courses
     ]
+
+
+def _my_status(course: Course, db: Session, user: User) -> str:
+    """Where the person searching already stands with this course.
+
+    Sent with the result so the button can say the right thing without a
+    second request per row — otherwise a search for "physics" is one
+    query plus one per course to find out which of them you are already
+    in."""
+    if course.teacher_id == user.id:
+        return "teaching"
+    enrolled = (
+        db.query(Enrollment.id)
+        .filter(Enrollment.course_id == course.id, Enrollment.student_id == user.id)
+        .first()
+    )
+    if enrolled:
+        return "enrolled"
+    req = (
+        db.query(EnrollmentRequest.status)
+        .filter(
+            EnrollmentRequest.course_id == course.id,
+            EnrollmentRequest.student_id == user.id,
+        )
+        .first()
+    )
+    if req and req[0] in ("pending", "declined"):
+        return req[0]
+    return "none"
 
 
 @router.post("/join", response_model=CourseOut)
@@ -206,6 +247,162 @@ def join_course(
 
     counts = _student_counts(db, [course.id])
     return _to_course_out(course, counts.get(course.id, 0), "student")
+
+
+@router.post("/{course_id}/request-join", response_model=EnrollmentRequestOut)
+def request_to_join(
+    course_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Ask a teacher to be let into their course.
+
+    The join code stays the quick path — a teacher who reads a code out
+    in class has already decided who is in the room. This is the other
+    case: a student finds the course by searching and the teacher has
+    never heard of them, so somebody has to say yes.
+
+    One row per student per course, reused if they ask again, so
+    pressing the button repeatedly cannot flood a teacher's list.
+    """
+    course = db.query(Course).filter(Course.id == course_id).one_or_none()
+    if course is None or course.archived:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such course")
+    if course.teacher_id == user.id:
+        raise HTTPException(status.HTTP_409_CONFLICT, "You teach this course")
+
+    already = (
+        db.query(Enrollment.id)
+        .filter(Enrollment.course_id == course_id, Enrollment.student_id == user.id)
+        .first()
+    )
+    if already:
+        raise HTTPException(status.HTTP_409_CONFLICT, "You are already in this course")
+
+    req = (
+        db.query(EnrollmentRequest)
+        .filter(
+            EnrollmentRequest.course_id == course_id,
+            EnrollmentRequest.student_id == user.id,
+        )
+        .one_or_none()
+    )
+    if req is None:
+        req = EnrollmentRequest(course_id=course_id, student_id=user.id)
+        db.add(req)
+    else:
+        # Asking again after a decline is allowed — people do get added
+        # late — but it is the same row, so the teacher sees one entry.
+        req.status = "pending"
+        req.decided_at = None
+        req.decided_by = None
+
+    notify(
+        db,
+        course.teacher_id,
+        kind="join_request",
+        title=f"{user.display_name} asked to join {course.title}",
+        body=user.email,
+        link=f"/courses/{course_id}",
+    )
+    db.commit()
+    db.refresh(req)
+    return _request_out(req, course, user)
+
+
+@router.get("/{course_id}/join-requests", response_model=list[EnrollmentRequestOut])
+def list_join_requests(
+    course_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Who is waiting to be let in. The teacher's own course only."""
+    course = _teacher_course_or_404(course_id, db, user)
+    rows = (
+        db.query(EnrollmentRequest, User)
+        .join(User, EnrollmentRequest.student_id == User.id)
+        .filter(
+            EnrollmentRequest.course_id == course_id,
+            EnrollmentRequest.status == "pending",
+        )
+        .order_by(EnrollmentRequest.created_at.asc())
+        .all()
+    )
+    return [_request_out(req, course, student) for req, student in rows]
+
+
+@router.post("/{course_id}/join-requests/{request_id}", response_model=EnrollmentRequestOut)
+def decide_join_request(
+    course_id: str,
+    request_id: str,
+    approve: bool,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Let a student in, or turn them down. Either way they are told."""
+    course = _teacher_course_or_404(course_id, db, user)
+    req = (
+        db.query(EnrollmentRequest)
+        .filter(EnrollmentRequest.id == request_id, EnrollmentRequest.course_id == course_id)
+        .one_or_none()
+    )
+    if req is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such request")
+
+    student = db.query(User).filter(User.id == req.student_id).one()
+
+    req.status = "approved" if approve else "declined"
+    req.decided_at = datetime.now(timezone.utc)
+    req.decided_by = user.id
+
+    if approve:
+        exists = (
+            db.query(Enrollment.id)
+            .filter(Enrollment.course_id == course_id, Enrollment.student_id == req.student_id)
+            .first()
+        )
+        if not exists:
+            db.add(Enrollment(course_id=course_id, student_id=req.student_id))
+
+    notify(
+        db,
+        req.student_id,
+        kind="join_decision",
+        title=(
+            f"You were added to {course.title}"
+            if approve
+            else f"Your request to join {course.title} was declined"
+        ),
+        link=f"/courses/{course_id}" if approve else "/",
+    )
+    db.commit()
+    db.refresh(req)
+    return _request_out(req, course, student)
+
+
+def _teacher_course_or_404(course_id: str, db: Session, user: User) -> Course:
+    course = db.query(Course).filter(Course.id == course_id).one_or_none()
+    if course is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such course")
+    if user.role != "admin" and course.teacher_id != user.id:
+        # 404 rather than 403: whose course this is should not be
+        # confirmable by poking at ids.
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such course")
+    return course
+
+
+def _request_out(req: EnrollmentRequest, course: Course, student: User) -> EnrollmentRequestOut:
+    return EnrollmentRequestOut(
+        id=req.id,
+        course_id=course.id,
+        course_title=course.title,
+        student_id=student.id,
+        student_name=student.display_name,
+        student_email=student.email,
+        status=req.status,
+        created_at=req.created_at,
+    )
 
 
 @router.get("/popular", response_model=list[CourseSummary])

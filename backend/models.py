@@ -54,6 +54,14 @@ class User(Base):
     created_at = Column(DateTime, default=_utcnow, nullable=False)
     last_login_at = Column(DateTime, nullable=True)
 
+    # Editable by the person themselves. `display_name` arrives from
+    # Entra ID on first sign-in and is a reasonable default, but it is
+    # whatever their institution put in Active Directory — often an
+    # initial and a surname — so they are allowed to correct it.
+    institution = Column(String, nullable=True)
+    avatar = Column(LargeBinary, nullable=True)
+    avatar_content_type = Column(String, nullable=True)
+
     courses_taught = relationship("Course", back_populates="teacher")
     enrollments = relationship("Enrollment", back_populates="student", cascade="all, delete-orphan")
 
@@ -72,6 +80,66 @@ class Course(Base):
     teacher = relationship("User", back_populates="courses_taught")
     enrollments = relationship("Enrollment", back_populates="course", cascade="all, delete-orphan")
     questions = relationship("Question", back_populates="course", cascade="all, delete-orphan")
+
+
+class EnrollmentRequest(Base):
+    """
+    A student asking to be let into a course.
+
+    Joining by code is unchanged and stays the quick path: a teacher who
+    reads a code out in class has already decided who is in the room.
+    This is for the other case — a student finds the course by searching
+    and the teacher has never heard of them, so somebody has to say yes.
+
+    One row per student per course, reused if they ask again, so a
+    declined student cannot flood a teacher's list by pressing the
+    button repeatedly.
+    """
+
+    __tablename__ = "enrollment_requests"
+    __table_args__ = (
+        UniqueConstraint("course_id", "student_id", name="uq_request_course_student"),
+    )
+
+    id = Column(String, primary_key=True, default=_uuid)
+    course_id = Column(String, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False)
+    student_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    status = Column(
+        SAEnum("pending", "approved", "declined", name="enrollment_request_status"),
+        default="pending",
+        nullable=False,
+    )
+    created_at = Column(DateTime, default=_utcnow, nullable=False)
+    decided_at = Column(DateTime, nullable=True)
+    decided_by = Column(String, ForeignKey("users.id"), nullable=True)
+
+    course = relationship("Course")
+    student = relationship("User", foreign_keys=[student_id])
+
+
+class Notification(Base):
+    """
+    Something that happened which a person would want to know about.
+
+    Written at the moment it happens rather than worked out on demand,
+    because "what has changed since you last looked" is not answerable
+    from the current state of the database — a released mark looks the
+    same whether it was released a minute ago or last term.
+
+    `link` is where it takes you when clicked. Kept as a plain path so
+    the server does not need to know how the client routes.
+    """
+
+    __tablename__ = "notifications"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    kind = Column(String, nullable=False)
+    title = Column(String, nullable=False)
+    body = Column(String, nullable=True)
+    link = Column(String, nullable=True)
+    read_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=_utcnow, nullable=False, index=True)
 
 
 class Enrollment(Base):
