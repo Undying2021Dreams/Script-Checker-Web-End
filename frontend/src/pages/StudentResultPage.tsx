@@ -127,8 +127,12 @@ export function StudentResultPage() {
 
             {g.feedback && (
               <div className="rounded-lg bg-muted/60 p-3 text-sm">
+                {/* Only claim the teacher wrote it when they did. The
+                    merged field falls back to the model's words, and
+                    attributing those to a person is a small lie a
+                    student could catch. */}
                 <p className="mb-1 text-xs font-medium text-muted-foreground">
-                  Your teacher's comment
+                  {g.override_feedback ? "Your teacher's comment" : 'Comment on your answer'}
                 </p>
                 <MathText text={g.feedback} />
               </div>
