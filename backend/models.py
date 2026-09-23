@@ -22,6 +22,7 @@ from sqlalchemy import (
     LargeBinary,
     UniqueConstraint,
 )
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import relationship
 
 from database import Base
@@ -220,6 +221,21 @@ class Submission(Base):
     # Auto-generated marks stay invisible to the student until a teacher
     # has reviewed them and released the submission deliberately.
     released_at = Column(DateTime, nullable=True)
+
+    @hybrid_property
+    def released(self) -> bool:
+        """Whether the student has been given these marks.
+
+        Asked in enough places — what a grading run may touch, what a
+        reset refuses, whether a crop may be read — that spelling it
+        `released_at is not None` at each one is an invitation to get it
+        wrong somewhere. Hybrid so it also works inside a query.
+        """
+        return self.released_at is not None
+
+    @released.expression
+    def released(cls):  # noqa: N805 — SQLAlchemy's expression form
+        return cls.released_at.isnot(None)
 
     question = relationship("Question")
     student = relationship("User", foreign_keys=[student_id])

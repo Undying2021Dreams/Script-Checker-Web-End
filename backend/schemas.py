@@ -168,6 +168,21 @@ class GradeOverride(BaseModel):
     feedback: str | None = None
 
 
+class GradeOverrideEntry(GradeOverride):
+    answer_box_id: str
+
+
+class BulkGradeOverride(BaseModel):
+    """Several boxes of one script, saved together.
+
+    A teacher who has read a whole answer decides it as a whole; saving
+    a box at a time meant a reload halfway through recorded half a
+    judgement.
+    """
+
+    grades: list[GradeOverrideEntry] = Field(min_length=1, max_length=200)
+
+
 class AnswerGradeOut(BaseModel):
     answer_box_id: str
     label: str

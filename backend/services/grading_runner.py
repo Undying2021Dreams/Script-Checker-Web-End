@@ -140,6 +140,43 @@ def build_grading_items(db: Session, submission: Submission) -> list[AnswerToGra
     return items
 
 
+def protected_answer_box_ids(db: Session, submission: Submission) -> set[str]:
+    """
+    Answer boxes a grading run must leave alone.
+
+    Two things put a mark beyond the machine's reach, and both are a
+    person having taken responsibility for it:
+
+    **Released.** The student has seen it. Re-marking it would change a
+    grade already given out, silently and from behind. Withdrawing the
+    marks is how a teacher says they are open again.
+
+    **Touched by a teacher.** Any box carrying an override — a mark, a
+    note, or both — was decided by a human. Resetting it is how a
+    teacher hands it back.
+
+    Protection is per box, not per script: a teacher who corrected one
+    part of an answer should not thereby freeze the other three, nor
+    have their correction be the only thing that survives.
+    """
+    if submission.released:
+        return {
+            g.answer_box_id
+            for g in db.query(AnswerGrade)
+            .filter(AnswerGrade.submission_id == submission.id)
+            .all()
+        }
+    return {
+        g.answer_box_id
+        for g in db.query(AnswerGrade)
+        .filter(
+            AnswerGrade.submission_id == submission.id,
+            AnswerGrade.overridden_at.isnot(None),
+        )
+        .all()
+    }
+
+
 async def grade_submission(
     db: Session,
     submission: Submission,
@@ -158,6 +195,19 @@ async def grade_submission(
         submission.grading_status = "failed"
         submission.grading_error = "Submission's question has no answer boxes"
         db.commit()
+        return submission
+
+    # Decided before any call is made, so protected work costs nothing
+    # rather than being marked again and then discarded.
+    protected = protected_answer_box_ids(db, submission)
+    items = [item for item in items if item.answer_box_id not in protected]
+    if not items:
+        # Everything here has been released or decided by a teacher.
+        # Not a failure — there is simply nothing left to mark.
+        submission.grading_status = "graded"
+        submission.grading_error = None
+        db.commit()
+        db.refresh(submission)
         return submission
 
     submission.grading_status = "grading"
