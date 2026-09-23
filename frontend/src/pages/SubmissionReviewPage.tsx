@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
@@ -24,6 +24,8 @@ import {
   useReleaseGrades,
   useRunGrading,
   useSetAnswerBoxMarks,
+  useOverrideGrades,
+  useResetMarks,
   useSubmissionAnswers,
   useSubmissionGrades,
 } from '@/lib/queries'
@@ -137,12 +139,17 @@ function GradeRow({
   grade,
   onOverride,
   onSetMarks,
+  onDraft,
   disabled,
 }: {
   box: GroupedAnswerBox
   grade?: AnswerGrade
   onOverride: (score: number | null, feedback: string) => Promise<void>
   onSetMarks: (answerBoxId: string, points: number) => Promise<void>
+  // Reported upwards so the whole script can be saved at once. Each row
+  // still owns its own fields; this is a copy for the button at the top
+  // to read, not a move of the state.
+  onDraft: (answerBoxId: string, score: string, feedback: string) => void
   disabled: boolean
 }) {
   // Seeded from whatever already stands for this box: the teacher's own
@@ -186,6 +193,10 @@ function GradeRow({
     setScore(savedScore?.toString() ?? '')
     setFeedback(savedFeedback)
   }, [modelStamp, savedScore, savedFeedback, dirty])
+
+  useEffect(() => {
+    onDraft(box.answer_box_id, score, feedback)
+  }, [box.answer_box_id, score, feedback, onDraft])
 
   const save = async () => {
     setSaving(true)
@@ -361,6 +372,15 @@ export function SubmissionReviewPage() {
 
   const runGrading = useRunGrading(submissionId)
   const override = useOverrideGrade(submissionId)
+  const overrideAll = useOverrideGrades(submissionId)
+  const resetMarks = useResetMarks(submissionId)
+  // What every row currently has in its fields. A ref, not state: it
+  // changes on every keystroke and nothing on this page re-renders
+  // because of it.
+  const drafts = useRef(new Map<string, { score: string; feedback: string }>())
+  const noteDraft = useCallback((answerBoxId: string, score: string, feedback: string) => {
+    drafts.current.set(answerBoxId, { score, feedback })
+  }, [])
   const release = useReleaseGrades(submissionId)
   const setMarks = useSetAnswerBoxMarks(answers?.question_id ?? '', submissionId)
 
@@ -370,6 +390,39 @@ export function SubmissionReviewPage() {
     try {
       await runGrading.mutateAsync(provider)
       toast.success('Grading started')
+    } catch (err) {
+      toast.error((err as Error).message)
+    }
+  }
+
+  const saveAll = async () => {
+    const grades = (answers?.answer_boxes ?? [])
+      .filter((box) => gradeByBox.has(box.answer_box_id))
+      .map((box) => {
+        const draft = drafts.current.get(box.answer_box_id)
+        const raw = (draft?.score ?? '').trim()
+        return {
+          answer_box_id: box.answer_box_id,
+          score: raw === '' ? null : Number(raw),
+          feedback: draft?.feedback?.trim() || null,
+        }
+      })
+    if (grades.length === 0) {
+      toast.error('There is nothing marked on this script yet.')
+      return
+    }
+    try {
+      await overrideAll.mutateAsync(grades)
+      toast.success(`Saved ${grades.length} mark${grades.length === 1 ? '' : 's'}`)
+    } catch (err) {
+      toast.error((err as Error).message)
+    }
+  }
+
+  const handleReset = async () => {
+    try {
+      await resetMarks.mutateAsync()
+      toast.success('Marks reset — this script can be marked again')
     } catch (err) {
       toast.error((err as Error).message)
     }
@@ -462,6 +515,74 @@ export function SubmissionReviewPage() {
         </p>
       )}
 
+      {/* The whole script at once. A teacher who has read an answer
+          decides it as a whole, and pressing a button per part meant a
+          reload halfway through recorded half a judgement. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Dialog>
+          <DialogTrigger
+            render={
+              <Button size="sm" disabled={!!inFlight || overrideAll.isPending}>
+                {overrideAll.isPending ? <Pending>Saving…</Pending> : 'Save all marks'}
+              </Button>
+            }
+          />
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Save every mark on this script?</DialogTitle>
+              <DialogDescription>
+                All {answers.answer_boxes.length} parts become your marks, including the ones
+                you have left as the model proposed them. They stop being re-marked when this
+                paper is graded again — resetting is what hands them back.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <DialogClose render={<Button variant="ghost">Cancel</Button>} />
+              <Button onClick={saveAll} disabled={overrideAll.isPending}>
+                {overrideAll.isPending ? <Pending>Saving…</Pending> : 'Save all'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog>
+          <DialogTrigger
+            render={
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-destructive"
+                disabled={!!inFlight || !!current?.released || resetMarks.isPending}
+              >
+                {resetMarks.isPending ? <Pending>Resetting…</Pending> : 'Reset marks'}
+              </Button>
+            }
+          />
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Reset every mark on this script?</DialogTitle>
+              <DialogDescription>
+                Both the model's marks and your own go, and the script becomes eligible to be
+                marked again. Yours go too on purpose: a part you have decided is never
+                re-marked, so clearing only the model's half would leave this half-frozen.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <DialogClose render={<Button variant="ghost">Keep them</Button>} />
+              <Button variant="destructive" onClick={handleReset} disabled={resetMarks.isPending}>
+                {resetMarks.isPending ? <Pending>Resetting…</Pending> : 'Reset'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {current?.released && (
+          <span className="text-xs text-muted-foreground">
+            Withdraw the marks before resetting them.
+          </span>
+        )}
+      </div>
+
       <div className="space-y-4">
         {answers.answer_boxes.map((box) => (
           <GradeRow
@@ -479,6 +600,7 @@ export function SubmissionReviewPage() {
             onSetMarks={async (answerBoxId, points) => {
               await setMarks.mutateAsync({ answerBoxId, points })
             }}
+            onDraft={noteDraft}
           />
         ))}
       </div>
