@@ -89,6 +89,7 @@ export interface AnswerGrade {
   feedback: string | null
   llm_feedback: string | null
   override_feedback: string | null
+  override_feedback_doc: Record<string, unknown> | null
   provider: string | null
   needs_manual_review: boolean
   review_reason: string | null

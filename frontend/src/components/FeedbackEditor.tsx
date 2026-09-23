@@ -1,25 +1,91 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import Placeholder from '@tiptap/extension-placeholder'
+import StarterKit from '@tiptap/starter-kit'
+import { EditorContent, useEditor, type Editor, type JSONContent } from '@tiptap/react'
 
+import { EquationNode } from '@/components/editor/extensions/EquationNode'
 import { MathText } from '@/components/MathText'
+import { Button } from '@/components/ui/button'
+import '@/components/editor/editor.css'
 
 /**
  * Where a teacher writes the comment a student will read.
  *
- * Maths was always going to be in these comments — half of marking a
- * script is writing down the step that went wrong — and the same KaTeX
- * renderer sets both this preview and the student's copy, so the two
- * cannot drift apart.
+ * The same editor the paper itself is written in, less the parts only a
+ * paper needs — no answer boxes, no model answers, no page layout. What
+ * it keeps is the part that matters here: equations, set as you write
+ * them.
  *
- * The comment is set underneath exactly as the student will see it,
- * and a comment that is nothing but an equation is typeset whether or
- * not it was wrapped in dollars — see MathText. A row of symbol buttons
- * lived here briefly and was in the way: the preview is the thing that
- * tells you whether you have it right.
+ * There is no preview any more, and deliberately. A preview exists to
+ * tell you what your source will turn into; when the equation is
+ * already typeset in front of you there is nothing left to preview, and
+ * a second copy of the comment underneath the first was just something
+ * else to read.
  *
- * Deliberately not a rich editor. Bold and bullet lists are worth
- * little in a two-line comment, and they would cost a change of storage
- * format, a migration, and a second renderer for the student's side.
+ * Saved twice over — as this document, and flattened to text with the
+ * equations written back as $…$. The flattening is the server's job, so
+ * the two cannot drift apart. Anything that only wants the words reads
+ * that, a student on an older client included.
  */
+
+const EXTENSIONS = [
+  StarterKit.configure({ heading: { levels: [3] } }),
+  // Images are the one thing left out. They would have to be stored
+  // against the paper, which is the answer key, and then served to
+  // students from there — a different access question than this change.
+  EquationNode.configure({ onEquationFromImage: null }),
+]
+
+function Toolbar({ editor }: { editor: Editor }) {
+  const btn = (active: boolean) => `h-7 px-2 text-xs ${active ? 'bg-muted font-semibold' : ''}`
+
+  return (
+    <div className="flex flex-wrap gap-1 border-b bg-card px-2 py-1.5">
+      <Button
+        type="button" variant="ghost" size="sm" title="Bold"
+        className={`${btn(editor.isActive('bold'))} font-bold`}
+        onClick={() => editor.chain().focus().toggleBold().run()}
+      >
+        B
+      </Button>
+      <Button
+        type="button" variant="ghost" size="sm" title="Italic"
+        className={`${btn(editor.isActive('italic'))} italic`}
+        onClick={() => editor.chain().focus().toggleItalic().run()}
+      >
+        I
+      </Button>
+      <Button
+        type="button" variant="ghost" size="sm" title="Bulleted list"
+        className={btn(editor.isActive('bulletList'))}
+        onClick={() => editor.chain().focus().toggleBulletList().run()}
+      >
+        • List
+      </Button>
+      <Button
+        type="button" variant="ghost" size="sm" title="Numbered list"
+        className={btn(editor.isActive('orderedList'))}
+        onClick={() => editor.chain().focus().toggleOrderedList().run()}
+      >
+        1. List
+      </Button>
+      <Button
+        type="button" variant="ghost" size="sm" title="Equation, in the line"
+        className="h-7 px-2 font-serif text-xs"
+        onClick={() => editor.chain().focus().insertEquation(false).run()}
+      >
+        $x$
+      </Button>
+      <Button
+        type="button" variant="ghost" size="sm" title="Equation, on its own line"
+        className="h-7 px-2 font-serif text-xs"
+        onClick={() => editor.chain().focus().insertEquation(true).run()}
+      >
+        $$x$$
+      </Button>
+    </div>
+  )
+}
 
 export function FeedbackEditor({
   value,
@@ -29,16 +95,36 @@ export function FeedbackEditor({
   provider,
   disabled,
 }: {
-  value: string
-  onChange: (next: string) => void
-  /** What the model said, if it has been asked. */
+  /** The teacher's comment as a document, if they have written one. */
+  value: JSONContent | null
+  onChange: (doc: JSONContent | null) => void
   modelFeedback?: string | null
-  /** What this teacher last saved, if anything. */
   savedFeedback?: string | null
   provider?: string | null
   disabled?: boolean
 }) {
   const [showHistory, setShowHistory] = useState(false)
+
+  const editor = useEditor({
+    editable: !disabled,
+    extensions: [
+      ...EXTENSIONS,
+      Placeholder.configure({ placeholder: 'What should the student know about this answer?' }),
+    ],
+    content: value ?? '',
+    onUpdate: ({ editor }) => {
+      // An emptied editor still holds a paragraph. Reporting that as a
+      // comment would mark the box as decided by a teacher who wrote
+      // nothing on it, and freeze it from ever being marked again.
+      onChange(editor.getText().trim() === '' ? null : editor.getJSON())
+    },
+  })
+
+  useEffect(() => {
+    editor?.setEditable(!disabled)
+  }, [editor, disabled])
+
+  if (!editor) return null
 
   const hasHistory = !!(modelFeedback || savedFeedback)
 
@@ -57,9 +143,9 @@ export function FeedbackEditor({
         )}
       </div>
 
-      {/* Both earlier versions, on demand. Replacing a comment without
-          being able to read the one you are replacing is how a teacher
-          ends up repeating the model, or contradicting themselves. */}
+      {/* Replacing a comment without being able to read the one you are
+          replacing is how a teacher ends up repeating the model, or
+          contradicting themselves from last week. */}
       {showHistory && (
         <div className="space-y-2 rounded-lg border bg-muted/40 p-2 text-sm">
           {savedFeedback && (
@@ -81,25 +167,24 @@ export function FeedbackEditor({
         </div>
       )}
 
-      <textarea
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        disabled={disabled}
-        rows={3}
-        placeholder="Write the comment the student will see. Maths between $…$ is typeset."
-        className="w-full rounded-md border bg-transparent px-3 py-2 text-sm"
-      />
-
-      {/* Set exactly as the student will read it — same renderer, same
-          delimiters. What is typed is rarely what is read. */}
-      {value.trim() !== '' && (
-        <div className="rounded-lg border border-dashed bg-card p-2 text-sm">
-          <p className="mb-1 text-xs font-medium text-muted-foreground">
-            What the student will see
-          </p>
-          <MathText text={value} />
-        </div>
-      )}
+      <div className="overflow-hidden rounded-md border">
+        {!disabled && <Toolbar editor={editor} />}
+        <EditorContent editor={editor} className="feedback-doc px-3 py-2 text-sm" />
+      </div>
     </div>
   )
+}
+
+/**
+ * The same comment, read-only — what the student opens.
+ *
+ * Rendered through the editor rather than a renderer of its own, so
+ * what they see is what was written. A second implementation is a
+ * second thing to keep in step, and the one that drifts is always the
+ * one nobody is looking at.
+ */
+export function FeedbackView({ doc }: { doc: JSONContent }) {
+  const editor = useEditor({ editable: false, extensions: EXTENSIONS, content: doc }, [doc])
+  if (!editor) return null
+  return <EditorContent editor={editor} className="feedback-doc text-sm" />
 }
