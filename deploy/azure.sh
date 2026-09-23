@@ -137,8 +137,36 @@ EOF
 }
 
 # ── the app itself ──────────────────────────────────────────────────
+# Whether the registry actually has the image we are about to deploy.
+#
+# Setting a tag that does not exist leaves the app configured to pull
+# something unpullable: the running replica keeps serving, so nothing
+# looks wrong, and the next restart has nothing to start. That happened
+# once, because a build had failed and the deploy went ahead anyway.
+# Refusing here turns a silent landmine into an error at the moment of
+# the mistake.
+image_exists() {
+  local ref="$1"
+  local repo="${ref%:*}" tag="${ref##*:}"
+  repo="${repo#ghcr.io/}"
+  local token
+  token=$(curl -fsS "https://ghcr.io/token?scope=repository:$repo:pull" \
+    | python3 -c 'import sys,json; print(json.load(sys.stdin)["token"])' 2>/dev/null) || return 1
+  curl -fsS -o /dev/null \
+    -H "Authorization: Bearer $token" \
+    -H 'Accept: application/vnd.oci.image.index.v1+json' \
+    -H 'Accept: application/vnd.docker.distribution.manifest.v2+json' \
+    "https://ghcr.io/v2/$repo/manifests/$tag"
+}
+
 cmd_deploy() {
   require_az; load_secrets
+
+  if ! image_exists "$IMAGE"; then
+    echo "error: $IMAGE is not in the registry." >&2
+    echo "       The build probably failed — check the Image workflow before deploying." >&2
+    exit 1
+  fi
 
   local host="$PG_NAME.postgres.database.azure.com"
   # sslmode=require: Azure's Postgres refuses plaintext, and psycopg2
