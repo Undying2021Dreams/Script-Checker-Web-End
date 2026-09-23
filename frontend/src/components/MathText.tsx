@@ -43,7 +43,41 @@ function parse(text: string): Segment[] {
   }
 
   if (cursor < text.length) segments.push({ kind: 'text', value: text.slice(cursor) })
+
+  // Nothing was delimited, but the whole thing is plainly an equation.
+  //
+  // A teacher pasting `\sigma(\mathbf{z})_i = \frac{e^{z_i}}{\sum_j
+  // e^{z_j}}` into a comment means an equation; they should not have to
+  // know that this renderer wants dollars around it, and being shown
+  // their own source back is a silly answer in a mathematics marking
+  // tool.
+  //
+  // Deliberately all-or-nothing. Prose with an undelimited fragment in
+  // it — "check your \frac{1}{2}" — is left alone, because rendering
+  // the sentence as maths would set the English in italic variables and
+  // look worse than the source did. Mixed content is what $…$ is for.
+  if (segments.length === 1 && segments[0].kind === 'text' && isBareMaths(text)) {
+    return [{ kind: 'math', value: text.trim(), display: true }]
+  }
+
   return segments
+}
+
+/** Whether a run of text with no delimiters is an equation and nothing
+ *  else: it has LaTeX in it, and no ordinary sentence around it. */
+function isBareMaths(text: string): boolean {
+  const trimmed = text.trim()
+  if (!trimmed) return false
+  // A control sequence, or a superscript/subscript — braced or not,
+  // since `x^2` is as much an equation as `x^{2}`.
+  if (!/\\[a-zA-Z]+|[\^_](?:\{|[A-Za-z0-9])/.test(trimmed)) return false
+  // Three plain words in a row means a sentence, not a formula.
+  // `\text{...}` is excluded first so a legitimate label inside an
+  // equation doesn't look like prose.
+  const withoutLatex = trimmed
+    .replace(/\\(?:text|mathrm|mathbf|operatorname)\{[^}]*\}/g, ' ')
+    .replace(/\\[a-zA-Z]+/g, ' ')
+  return !/[a-zA-Z]{2,}\s+[a-zA-Z]{2,}\s+[a-zA-Z]{2,}/.test(withoutLatex)
 }
 
 export function MathText({ text, className }: { text: string; className?: string }) {

@@ -1,42 +1,25 @@
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 
 import { MathText } from '@/components/MathText'
-import { Button } from '@/components/ui/button'
 
 /**
  * Where a teacher writes the comment a student will read.
  *
  * Maths was always going to be in these comments — half of marking a
- * script is writing down the step that went wrong — and it has always
- * rendered, because the same KaTeX renderer sets the student's copy.
- * What was missing was any help producing it: a teacher had to know
- * that `\frac{a}{b}` is a fraction and type it by hand, into a field
- * that showed them nothing until they saved.
+ * script is writing down the step that went wrong — and the same KaTeX
+ * renderer sets both this preview and the student's copy, so the two
+ * cannot drift apart.
  *
- * So: buttons that insert the notation, and the comment set underneath
- * exactly as the student will see it. Deliberately not a rich editor —
- * bold and bullet lists are worth little in a two-line comment, and
- * they would cost a change of storage format, a migration, and a
- * second renderer for the student's side.
+ * The comment is set underneath exactly as the student will see it,
+ * and a comment that is nothing but an equation is typeset whether or
+ * not it was wrapped in dollars — see MathText. A row of symbol buttons
+ * lived here briefly and was in the way: the preview is the thing that
+ * tells you whether you have it right.
+ *
+ * Deliberately not a rich editor. Bold and bullet lists are worth
+ * little in a two-line comment, and they would cost a change of storage
+ * format, a migration, and a second renderer for the student's side.
  */
-
-/** Inserted around the selection, or at the cursor. `caret` says where
- *  to leave the cursor, counted back from the end of the snippet. */
-const TOOLS: { label: string; title: string; before: string; after: string; caret?: number }[] = [
-  { label: '$x$', title: 'Maths, inline', before: '$', after: '$' },
-  { label: '$$x$$', title: 'Maths, on its own line', before: '\n$$', after: '$$\n' },
-  { label: 'a⁄b', title: 'Fraction', before: '\\frac{', after: '}{}', caret: 1 },
-  { label: 'xⁿ', title: 'Power', before: '^{', after: '}', caret: 1 },
-  { label: 'xₙ', title: 'Subscript', before: '_{', after: '}', caret: 1 },
-  { label: '√', title: 'Square root', before: '\\sqrt{', after: '}', caret: 1 },
-  { label: '∫', title: 'Integral', before: '\\int_{', after: '}^{} ', caret: 4 },
-  { label: '≤', title: 'Less than or equal', before: '\\leq ', after: '' },
-  { label: '≥', title: 'Greater than or equal', before: '\\geq ', after: '' },
-  { label: '≠', title: 'Not equal', before: '\\neq ', after: '' },
-  { label: '×', title: 'Times', before: '\\times ', after: '' },
-  { label: 'π', title: 'Pi', before: '\\pi ', after: '' },
-  { label: '°', title: 'Degrees', before: '^{\\circ}', after: '' },
-]
 
 export function FeedbackEditor({
   value,
@@ -55,34 +38,7 @@ export function FeedbackEditor({
   provider?: string | null
   disabled?: boolean
 }) {
-  const box = useRef<HTMLTextAreaElement>(null)
   const [showHistory, setShowHistory] = useState(false)
-
-  const insert = (before: string, after: string, caret = 0) => {
-    const el = box.current
-    if (!el) return
-    const start = el.selectionStart ?? value.length
-    const end = el.selectionEnd ?? start
-    const chosen = value.slice(start, end)
-    onChange(value.slice(0, start) + before + chosen + after + value.slice(end))
-
-    // With something selected, it becomes the first part of the
-    // notation and the cursor belongs in the next empty slot. With
-    // nothing selected, every slot is empty, so the cursor belongs in
-    // the first one — otherwise clicking the fraction button leaves you
-    // typing the denominator.
-    const at = chosen
-      ? start + before.length + chosen.length + after.length - caret
-      : start + before.length
-
-    // After React has written the new value back, or the cursor lands
-    // in the old text and the next keystroke appears somewhere
-    // surprising.
-    requestAnimationFrame(() => {
-      el.focus()
-      el.setSelectionRange(at, at)
-    })
-  }
 
   const hasHistory = !!(modelFeedback || savedFeedback)
 
@@ -125,25 +81,7 @@ export function FeedbackEditor({
         </div>
       )}
 
-      <div className="flex flex-wrap gap-1">
-        {TOOLS.map((t) => (
-          <Button
-            key={t.label}
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={disabled}
-            title={t.title}
-            className="h-7 px-2 font-serif text-xs"
-            onClick={() => insert(t.before, t.after, t.caret)}
-          >
-            {t.label}
-          </Button>
-        ))}
-      </div>
-
       <textarea
-        ref={box}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
