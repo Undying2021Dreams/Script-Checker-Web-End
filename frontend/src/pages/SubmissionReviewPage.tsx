@@ -170,6 +170,7 @@ function GradeRow({
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [confirming, setConfirming] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
 
   // A run of the model is allowed to take the fields over, including
   // from half-typed text: the teacher asked for a fresh opinion and
@@ -290,15 +291,68 @@ function GradeRow({
               inputMode="decimal"
             />
           </div>
-          <div className="min-w-48 flex-1">
-            <label className="text-xs text-muted-foreground">Your feedback (optional)</label>
-            <Input
+          <div className="min-w-48 flex-1 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <label className="text-xs text-muted-foreground">Your feedback (optional)</label>
+              {(grade?.llm_feedback || grade?.override_feedback) && (
+                <button
+                  type="button"
+                  onClick={() => setShowHistory((v) => !v)}
+                  className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+                >
+                  {showHistory ? 'Hide what was written before' : 'What was written before'}
+                </button>
+              )}
+            </div>
+
+            {/* Both earlier versions, on demand. Replacing a comment
+                without being able to read the one you are replacing is
+                how a teacher ends up repeating the model, or
+                contradicting themselves from last week. */}
+            {showHistory && (
+              <div className="space-y-2 rounded-lg border bg-muted/40 p-2 text-sm">
+                {grade?.override_feedback && (
+                  <div>
+                    <p className="mb-1 text-xs font-medium text-muted-foreground">
+                      Yours, as last saved
+                    </p>
+                    <MathText text={grade.override_feedback} />
+                  </div>
+                )}
+                {grade?.llm_feedback && (
+                  <div>
+                    <p className="mb-1 text-xs font-medium text-muted-foreground">
+                      The model's {grade.provider ? `(${grade.provider})` : ''}
+                    </p>
+                    <MathText text={grade.llm_feedback} />
+                  </div>
+                )}
+              </div>
+            )}
+
+            <textarea
               value={feedback}
               onChange={(e) => {
                 setDirty(true)
                 setFeedback(e.target.value)
               }}
+              rows={3}
+              placeholder="Write the comment the student will see. Maths in $…$ is typeset."
+              className="w-full rounded-md border bg-transparent px-3 py-2 text-sm"
             />
+
+            {/* Set exactly as the student will see it. The models write
+                maths in LaTeX whether asked to or not, and so does
+                anyone who has used the question editor, so what is
+                typed is rarely what is read. */}
+            {feedback.trim() !== '' && (
+              <div className="rounded-lg border border-dashed bg-card p-2 text-sm">
+                <p className="mb-1 text-xs font-medium text-muted-foreground">
+                  What the student will see
+                </p>
+                <MathText text={feedback} />
+              </div>
+            )}
           </div>
           <Dialog open={confirming} onOpenChange={setConfirming}>
             <DialogTrigger
