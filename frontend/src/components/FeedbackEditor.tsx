@@ -70,18 +70,18 @@ function Toolbar({ editor }: { editor: Editor }) {
         1. List
       </Button>
       <Button
-        type="button" variant="ghost" size="sm" title="Equation, in the line"
-        className="h-7 px-2 font-serif text-xs"
+        type="button" variant="ghost" size="sm" title="An equation inside the sentence"
+        className={btn(false)}
         onClick={() => editor.chain().focus().insertEquation(false).run()}
       >
-        $x$
+        Inline equation
       </Button>
       <Button
-        type="button" variant="ghost" size="sm" title="Equation, on its own line"
-        className="h-7 px-2 font-serif text-xs"
+        type="button" variant="ghost" size="sm" title="An equation on its own line"
+        className={btn(false)}
         onClick={() => editor.chain().focus().insertEquation(true).run()}
       >
-        $$x$$
+        Block equation
       </Button>
     </div>
   )
