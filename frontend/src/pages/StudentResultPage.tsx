@@ -1,6 +1,7 @@
 import { Link, useParams } from 'react-router-dom'
 
 import { PaperImage } from '@/components/Paper'
+import { FeedbackView } from '@/components/FeedbackEditor'
 import { MathText } from '@/components/MathText'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -134,7 +135,15 @@ export function StudentResultPage() {
                 <p className="mb-1 text-xs font-medium text-muted-foreground">
                   {g.override_feedback ? "Your teacher's comment" : 'Comment on your answer'}
                 </p>
-                <MathText text={g.feedback} />
+                {/* Written as a document where the teacher wrote one,
+                    so the equations are set rather than described. The
+                    flattened text is what everything else falls back
+                    to, including a comment the model wrote. */}
+                {g.override_feedback_doc ? (
+                  <FeedbackView doc={g.override_feedback_doc} />
+                ) : (
+                  <MathText text={g.feedback} />
+                )}
               </div>
             )}
 

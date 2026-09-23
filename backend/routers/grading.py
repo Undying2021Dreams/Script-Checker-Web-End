@@ -30,6 +30,7 @@ from schemas import (
 from ratelimit import BULK_LLM_LIMIT, LLM_LIMIT, limiter
 from security import get_current_user
 from services.grading import pair_answer_boxes_with_ground_truth
+from services.llm_provider import extract_plain_text
 from services.grading_runner import (
     grade_submission,
     protected_answer_box_ids,
@@ -129,6 +130,7 @@ def _grades_payload(db: Session, sub: Submission, *, include_feedback: bool = Tr
                 feedback=(g.override_feedback or g.llm_feedback) if include_feedback else None,
                 llm_feedback=g.llm_feedback if include_feedback else None,
                 override_feedback=g.override_feedback if include_feedback else None,
+                override_feedback_doc=g.override_feedback_doc if include_feedback else None,
                 provider=g.provider,
                 needs_manual_review=g.needs_manual_review,
                 review_reason=g.review_reason,
@@ -431,7 +433,7 @@ def override_grade(
     # An empty box means "no note of my own", not "a note that is the
     # empty string" — stored as NULL so the model's feedback shows
     # through rather than being masked by a blank.
-    grade.override_feedback = (body.feedback or "").strip() or None
+    _store_feedback(grade, body.feedback, body.feedback_doc)
 
     if grade.override_score is None and grade.override_feedback is None:
         # Clearing both is a teacher stepping back off this box, which
@@ -448,6 +450,29 @@ def override_grade(
 
     db.commit()
     return _grades_payload(db, sub)
+
+
+def _store_feedback(grade: AnswerGrade, feedback: str | None, doc: dict | None) -> None:
+    """
+    Put a teacher's comment on a grade, in both forms.
+
+    The document is what they composed; the flattened text is what
+    everything else reads — the merged `feedback` field a student sees
+    on a client that cannot render a document, and anything handed back
+    to a model. Flattening here rather than on the client means the two
+    cannot disagree, and equations survive as $…$ rather than vanishing.
+    """
+    if doc:
+        text = extract_plain_text(doc).strip()
+        # A document can be structurally present and say nothing — an
+        # empty paragraph is what an editor leaves behind when its text
+        # is deleted. That is not a comment.
+        grade.override_feedback_doc = doc if text else None
+        grade.override_feedback = text or None
+        return
+
+    grade.override_feedback_doc = None
+    grade.override_feedback = (feedback or "").strip() or None
 
 
 def _clear_marks(db: Session, sub: Submission) -> int:
@@ -559,7 +584,7 @@ def override_grades(
     for entry in body.grades:
         grade = grades[entry.answer_box_id]
         grade.override_score = entry.score
-        grade.override_feedback = (entry.feedback or "").strip() or None
+        _store_feedback(grade, entry.feedback, entry.feedback_doc)
         # Nothing of the teacher's left on the box means they have not
         # decided it after all, so it goes back to being the machine's
         # to re-mark.

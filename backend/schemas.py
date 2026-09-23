@@ -166,6 +166,11 @@ class GradeOverride(BaseModel):
     # None clears the override and falls back to the model's own mark.
     score: float | None = None
     feedback: str | None = None
+    # The comment as it was composed, formatting and all. The server
+    # flattens it into `feedback` itself, so a client sending this can
+    # leave that out — and an older client sending only `feedback` still
+    # works, which is why this is optional rather than a replacement.
+    feedback_doc: dict[str, Any] | None = None
 
 
 class GradeOverrideEntry(GradeOverride):
@@ -199,6 +204,10 @@ class AnswerGradeOut(BaseModel):
     # top, or an edit begins from the wrong text.
     llm_feedback: str | None = None
     override_feedback: str | None = None
+    # Present only where the teacher wrote one. A client that can render
+    # it should; everything else has `feedback` above, which says the
+    # same words.
+    override_feedback_doc: dict[str, Any] | None = None
     provider: str | None
     needs_manual_review: bool
     review_reason: str | None

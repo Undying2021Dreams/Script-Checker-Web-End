@@ -80,3 +80,40 @@
 /* Tiptap wraps each list item's text in a paragraph, which would
    otherwise inherit the 10px paragraph gap and space the bullets out. */
 .doc-page .ProseMirror li > p { margin: 0; }
+
+
+/* A teacher's comment, in the editor and in the student's copy.
+   The document styles above are written for a printed page inside a
+   page-shaped frame; a comment is a few lines inside a card, and
+   inherits none of that. */
+.feedback-doc .ProseMirror {
+  outline: none;
+  min-height: 3.5rem;
+}
+
+.feedback-doc .ProseMirror > * + * {
+  margin-top: 0.4rem;
+}
+
+.feedback-doc .ProseMirror p {
+  margin: 0;
+}
+
+.feedback-doc .ProseMirror ul,
+.feedback-doc .ProseMirror ol {
+  margin: 0;
+  padding-left: 1.4rem;
+}
+
+.feedback-doc .ProseMirror h3 {
+  margin: 0;
+  font-weight: 600;
+}
+
+.feedback-doc .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  color: var(--color-muted-foreground);
+  pointer-events: none;
+}

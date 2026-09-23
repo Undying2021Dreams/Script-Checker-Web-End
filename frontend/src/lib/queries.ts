@@ -220,10 +220,20 @@ export function useRunGrading(submissionId: string) {
 export function useOverrideGrade(submissionId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ answerBoxId, score, feedback }: { answerBoxId: string; score: number | null; feedback?: string }) =>
+    mutationFn: ({
+      answerBoxId,
+      score,
+      feedbackDoc,
+    }: {
+      answerBoxId: string
+      score: number | null
+      // The server flattens this into the plain-text feedback itself,
+      // so a client sends the document and nothing else.
+      feedbackDoc?: Record<string, unknown> | null
+    }) =>
       apiFetch<SubmissionGrades>(`/submissions/${submissionId}/grades/${answerBoxId}`, {
         method: 'PATCH',
-        body: JSON.stringify({ score, feedback }),
+        body: JSON.stringify({ score, feedback_doc: feedbackDoc ?? null }),
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['grades', submissionId] }),
   })
@@ -324,7 +334,13 @@ export function useDeleteSubmission(questionId: string) {
 export function useOverrideGrades(submissionId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (grades: { answer_box_id: string; score: number | null; feedback: string | null }[]) =>
+    mutationFn: (
+      grades: {
+        answer_box_id: string
+        score: number | null
+        feedback_doc: Record<string, unknown> | null
+      }[],
+    ) =>
       apiFetch<SubmissionGrades>(`/submissions/${submissionId}/grades`, {
         method: 'PATCH',
         body: JSON.stringify({ grades }),

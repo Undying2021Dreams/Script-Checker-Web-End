@@ -245,3 +245,84 @@ def test_a_student_cannot_read_a_crop_until_their_marks_are_released(
     sub.released_at = __import__('datetime').datetime.now(__import__('datetime').timezone.utc)
     db.commit()
     assert client.as_user(student).get(url).status_code == 200
+
+
+def _doc(*nodes):
+    return {"type": "doc", "content": list(nodes)}
+
+
+def _para(*inline):
+    return {"type": "paragraph", "content": list(inline)}
+
+
+def test_a_written_comment_is_stored_as_a_document_and_as_words(db, course, client, make_user):
+    """
+    Both forms, from one request.
+
+    The document is what the teacher composed; the flattened text is
+    what everything else reads — the merged `feedback` a student's
+    client falls back to, and anything handed back to a model. The
+    server does the flattening so the two cannot disagree, and an
+    equation survives it as $…$ rather than disappearing, because an
+    equation node carries its LaTeX in attributes and has no text
+    content to walk.
+    """
+    student = make_user()
+    q = _paper_with_two_boxes(db, course)
+    sub = _submission_with_marks(db, q, student.id)
+    box = sorted(q.answer_boxes, key=lambda b: b.order_index)[0]
+
+    doc = _doc(
+        _para(
+            {"type": "text", "text": "Method is right, but "},
+            {"type": "equation", "attrs": {"latex": "x = -4", "display": False}},
+            {"type": "text", "text": " does not satisfy the second equation."},
+        )
+    )
+    res = client.as_user(course.teacher).patch(
+        f"/api/submissions/{sub.id}/grades/{box.id}",
+        json={"score": 3, "feedback_doc": doc},
+    )
+    assert res.status_code == 200, res.text
+
+    grade = (
+        db.query(AnswerGrade)
+        .filter(AnswerGrade.submission_id == sub.id, AnswerGrade.answer_box_id == box.id)
+        .one()
+    )
+    assert grade.override_feedback_doc == doc
+    assert "Method is right" in grade.override_feedback
+    assert "$x = -4$" in grade.override_feedback, grade.override_feedback
+
+    # And it reaches a client both ways round.
+    out = next(g for g in res.json()["grades"] if g["answer_box_id"] == box.id)
+    assert out["override_feedback_doc"] == doc
+    assert out["feedback"] == grade.override_feedback
+
+
+def test_an_emptied_editor_is_not_a_comment(db, course, client, make_user):
+    """
+    An editor with its text deleted still holds a paragraph. Stored as a
+    comment, it would mark the box as decided by a teacher who wrote
+    nothing on it — and freeze it from ever being marked again.
+    """
+    student = make_user()
+    q = _paper_with_two_boxes(db, course)
+    sub = _submission_with_marks(db, q, student.id)
+    box = sorted(q.answer_boxes, key=lambda b: b.order_index)[0]
+
+    res = client.as_user(course.teacher).patch(
+        f"/api/submissions/{sub.id}/grades/{box.id}",
+        json={"score": None, "feedback_doc": _doc(_para())},
+    )
+    assert res.status_code == 200, res.text
+
+    grade = (
+        db.query(AnswerGrade)
+        .filter(AnswerGrade.submission_id == sub.id, AnswerGrade.answer_box_id == box.id)
+        .one()
+    )
+    assert grade.override_feedback_doc is None
+    assert grade.override_feedback is None
+    db.expire_all()
+    assert protected_answer_box_ids(db, sub) == set()

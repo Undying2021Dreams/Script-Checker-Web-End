@@ -30,7 +30,9 @@ import {
   useSubmissionGrades,
 } from '@/lib/queries'
 import type { AnswerGrade, GroupedAnswerBox } from '@/lib/types'
-import { FeedbackEditor } from '@/components/FeedbackEditor'
+import type { JSONContent } from '@tiptap/react'
+
+import { FeedbackEditor, FeedbackView } from '@/components/FeedbackEditor'
 import { MathText } from '@/components/MathText'
 
 const PROVIDERS = [
@@ -145,12 +147,12 @@ function GradeRow({
 }: {
   box: GroupedAnswerBox
   grade?: AnswerGrade
-  onOverride: (score: number | null, feedback: string) => Promise<void>
+  onOverride: (score: number | null, feedbackDoc: JSONContent | null) => Promise<void>
   onSetMarks: (answerBoxId: string, points: number) => Promise<void>
   // Reported upwards so the whole script can be saved at once. Each row
   // still owns its own fields; this is a copy for the button at the top
   // to read, not a move of the state.
-  onDraft: (answerBoxId: string, score: string, feedback: string) => void
+  onDraft: (answerBoxId: string, score: string, feedbackDoc: JSONContent | null) => void
   disabled: boolean
 }) {
   // Seeded from whatever already stands for this box: the teacher's own
@@ -164,10 +166,14 @@ function GradeRow({
   // edits in progress, which a bare useEffect would do on every poll
   // while a grading run is live.
   const savedScore = grade?.override_score ?? grade?.llm_score ?? null
-  const savedFeedback = grade?.override_feedback ?? grade?.llm_feedback ?? ''
+  // The comment is a document now. A teacher who has not written one
+  // starts from nothing rather than from the model's words: theirs is a
+  // second opinion, not a draft to edit, and it stays visible under
+  // "what was written before".
+  const savedDoc = grade?.override_feedback_doc ?? null
 
   const [score, setScore] = useState<string>(savedScore?.toString() ?? '')
-  const [feedback, setFeedback] = useState<string>(savedFeedback)
+  const [feedbackDoc, setFeedbackDoc] = useState<JSONContent | null>(savedDoc)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [confirming, setConfirming] = useState(false)
@@ -192,17 +198,16 @@ function GradeRow({
     if (freshlyEvaluated) setDirty(false)
 
     setScore(savedScore?.toString() ?? '')
-    setFeedback(savedFeedback)
-  }, [modelStamp, savedScore, savedFeedback, dirty])
+  }, [modelStamp, savedScore, dirty])
 
   useEffect(() => {
-    onDraft(box.answer_box_id, score, feedback)
-  }, [box.answer_box_id, score, feedback, onDraft])
+    onDraft(box.answer_box_id, score, feedbackDoc)
+  }, [box.answer_box_id, score, feedbackDoc, onDraft])
 
   const save = async () => {
     setSaving(true)
     try {
-      await onOverride(score.trim() === '' ? null : Number(score), feedback)
+      await onOverride(score.trim() === '' ? null : Number(score), feedbackDoc)
       setDirty(false)
       setConfirming(false)
       toast.success(`Saved mark for ${box.label || 'this part'}`)
@@ -293,10 +298,10 @@ function GradeRow({
           </div>
           <div className="min-w-48 flex-1">
             <FeedbackEditor
-              value={feedback}
+              value={feedbackDoc}
               onChange={(next) => {
                 setDirty(true)
-                setFeedback(next)
+                setFeedbackDoc(next)
               }}
               modelFeedback={grade?.llm_feedback}
               savedFeedback={grade?.override_feedback}
@@ -335,16 +340,16 @@ function GradeRow({
                     </span>
                   )}
                 </p>
-                <p>
+                <div>
                   <span className="text-muted-foreground">Feedback: </span>
-                  {feedback.trim() === '' ? (
+                  {feedbackDoc ? (
+                    <FeedbackView doc={feedbackDoc} />
+                  ) : (
                     <span className="text-muted-foreground">
                       blank — the model's comment will stand
                     </span>
-                  ) : (
-                    <MathText text={feedback} />
                   )}
-                </p>
+                </div>
               </div>
 
               <DialogFooter>
@@ -381,10 +386,13 @@ export function SubmissionReviewPage() {
   // What every row currently has in its fields. A ref, not state: it
   // changes on every keystroke and nothing on this page re-renders
   // because of it.
-  const drafts = useRef(new Map<string, { score: string; feedback: string }>())
-  const noteDraft = useCallback((answerBoxId: string, score: string, feedback: string) => {
-    drafts.current.set(answerBoxId, { score, feedback })
-  }, [])
+  const drafts = useRef(new Map<string, { score: string; feedbackDoc: JSONContent | null }>())
+  const noteDraft = useCallback(
+    (answerBoxId: string, score: string, feedbackDoc: JSONContent | null) => {
+      drafts.current.set(answerBoxId, { score, feedbackDoc })
+    },
+    [],
+  )
   const release = useReleaseGrades(submissionId)
   const setMarks = useSetAnswerBoxMarks(answers?.question_id ?? '', submissionId)
 
@@ -408,7 +416,7 @@ export function SubmissionReviewPage() {
         return {
           answer_box_id: box.answer_box_id,
           score: raw === '' ? null : Number(raw),
-          feedback: draft?.feedback?.trim() || null,
+          feedback_doc: draft?.feedbackDoc ?? null,
         }
       })
     if (grades.length === 0) {
@@ -594,11 +602,11 @@ export function SubmissionReviewPage() {
             box={box}
             grade={gradeByBox.get(box.answer_box_id)}
             disabled={!!inFlight}
-            onOverride={async (score, feedback) => {
+            onOverride={async (score, feedbackDoc) => {
               await override.mutateAsync({
                 answerBoxId: box.answer_box_id,
                 score,
-                feedback: feedback || undefined,
+                feedbackDoc,
               })
             }}
             onSetMarks={async (answerBoxId, points) => {

@@ -270,6 +270,14 @@ class AnswerGrade(Base):
 
     override_score = Column(Float, nullable=True)
     override_feedback = Column(String, nullable=True)
+    # The same comment as the teacher composed it: a Tiptap document,
+    # so formatting and typeset equations survive the round trip.
+    #
+    # `override_feedback` above is kept alongside as the flattened text,
+    # with equations inlined as $…$. Everything that only wants words —
+    # the merged `feedback` field, a future export, anything handed back
+    # to a model — reads that and is unaffected by this existing.
+    override_feedback_doc = Column(JSON, nullable=True)
     overridden_by = Column(String, ForeignKey("users.id"), nullable=True)
     overridden_at = Column(DateTime, nullable=True)
 
