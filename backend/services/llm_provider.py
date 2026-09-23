@@ -495,6 +495,23 @@ class OpenAIProvider(LLMProvider):
         return resp.json()["choices"][0]["message"]["content"]
 
 
+def _claude_text(data: dict) -> str:
+    """The first text block of a Claude response.
+
+    Not `content[0]`. The current models think by default and return
+    their thinking as content blocks ahead of the answer — with the
+    reasoning itself omitted, so the block is present and empty.
+    Reaching for the first block therefore finds a `thinking` block with
+    no `text` key at all, which fails as a KeyError rather than as
+    anything that names the cause.
+    """
+    for blk in data.get("content", []):
+        if blk.get("type") == "text":
+            return blk.get("text", "")
+    stop = data.get("stop_reason")
+    raise ValueError(f"Claude returned no text (stop_reason={stop!r})")
+
+
 class ClaudeProvider(LLMProvider):
     @property
     def MODEL(self) -> str:
@@ -511,21 +528,19 @@ class ClaudeProvider(LLMProvider):
         payload = {
             "model": self.MODEL,
             "max_tokens": 2048,
-            "temperature": 0.2,
             "system": RUBRIC_SYSTEM_PROMPT,
             "messages": [{"role": "user", "content": _build_user_message(question_text, boxes)}],
         }
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(self.BASE_URL, json=payload, headers=self._headers())
             _raise_for_status(resp, "Claude")
-        return _parse_response(resp.json()["content"][0]["text"], boxes)
+        return _parse_response(_claude_text(resp.json()), boxes)
 
     async def equation_from_image(self, image_bytes: bytes, content_type: str) -> str:
         b64 = base64.b64encode(image_bytes).decode("ascii")
         payload = {
             "model": self.MODEL,
             "max_tokens": 1024,
-            "temperature": 0.1,
             "system": EQUATION_SYSTEM_PROMPT,
             "messages": [{"role": "user", "content": [
                 {"type": "image", "source": {"type": "base64", "media_type": content_type, "data": b64}},
@@ -534,7 +549,7 @@ class ClaudeProvider(LLMProvider):
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(self.BASE_URL, json=payload, headers=self._headers())
             _raise_for_status(resp, "Claude")
-        return _clean_latex(resp.json()["content"][0]["text"])
+        return _clean_latex(_claude_text(resp.json()))
 
     async def check_correctness(
         self,
@@ -553,14 +568,13 @@ class ClaudeProvider(LLMProvider):
         payload = {
             "model": self.MODEL,
             "max_tokens": 2048,
-            "temperature": 0.2,
             "system": CORRECTNESS_SYSTEM_PROMPT,
             "messages": [{"role": "user", "content": content}],
         }
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(self.BASE_URL, json=payload, headers=self._headers())
             _raise_for_status(resp, "Claude")
-        return _parse_correctness_response(resp.json()["content"][0]["text"])
+        return _parse_correctness_response(_claude_text(resp.json()))
 
     async def complete(
         self, system_prompt: str, user_text: str, images: list[tuple[bytes, str]]
@@ -573,14 +587,13 @@ class ClaudeProvider(LLMProvider):
         payload = {
             "model": self.MODEL,
             "max_tokens": 2048,
-            "temperature": 0.2,
             "system": system_prompt,
             "messages": [{"role": "user", "content": content}],
         }
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(self.BASE_URL, json=payload, headers=self._headers())
             _raise_for_status(resp, "Claude")
-        return resp.json()["content"][0]["text"]
+        return _claude_text(resp.json())
 
 
 async def _post_self_hosted(url: str, payload: dict, timeout: float) -> dict:
