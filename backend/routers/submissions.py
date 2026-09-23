@@ -918,6 +918,36 @@ def get_submission_answers(submission_id: str, user: User = Depends(get_current_
 
 @router.get("/{submission_id}/crops/{answer_box_id}")
 def get_crop_image(submission_id: str, answer_box_id: str, part: int = 0, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """
+    One cropped answer from a script.
+
+    This asked only that you were signed in. Any account could read any
+    student's handwriting by guessing at ids — and ids appear in the
+    URLs of anyone who has seen the paper. Now: the teacher of the
+    course, or the student whose work it is, and for the student only
+    once their marks have been released. Before that the crop is part of
+    an unreviewed machine mark, which is not a grade yet.
+    """
+    # Owner or course teacher only — this is where that is enforced.
+    sub = _get_submission_or_404(submission_id, db, user)
+
+    course = (
+        db.query(Course)
+        .join(Question, Question.course_id == Course.id)
+        .filter(Question.id == sub.question_id)
+        .first()
+    )
+    marks_are_theirs_to_see = (
+        user.role == "admin"
+        or (course is not None and course.teacher_id == user.id)
+        or sub.released
+    )
+    if not marks_are_theirs_to_see:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "Marks for this script haven't been released yet.",
+        )
+
     crop = (
         db.query(CropImage)
         .filter(

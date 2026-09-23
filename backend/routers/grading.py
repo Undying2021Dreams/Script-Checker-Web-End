@@ -21,6 +21,7 @@ from schemas import (
     BulkGradeStarted,
     BulkReleaseRequest,
     BulkReleaseResult,
+    BulkGradeOverride,
     BulkGradeRequest,
     GradeOverride,
     GradeRunRequest,
@@ -29,7 +30,11 @@ from schemas import (
 from ratelimit import BULK_LLM_LIMIT, LLM_LIMIT, limiter
 from security import get_current_user
 from services.grading import pair_answer_boxes_with_ground_truth
-from services.grading_runner import grade_submission, submission_totals
+from services.grading_runner import (
+    grade_submission,
+    protected_answer_box_ids,
+    submission_totals,
+)
 from services.llm_provider import extract_plain_text, get_provider
 
 logger = logging.getLogger(__name__)
@@ -268,6 +273,7 @@ def grade_all_submissions(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
 
     submissions = db.query(Submission).filter(Submission.question_id == question_id).all()
+    box_ids = {b.id for b in question.answer_boxes}
 
     to_grade, skipped = [], 0
     for sub in submissions:
@@ -276,7 +282,19 @@ def grade_all_submissions(
         if sub.grading_status in ("queued", "grading"):
             skipped += 1
             continue
+        # Released work is never re-marked, whatever was asked for. The
+        # student has already been given these marks; changing them from
+        # behind is not a rerun, it is a different grade. Withdrawing
+        # them is how a teacher reopens the question.
+        if sub.released:
+            skipped += 1
+            continue
         if sub.grading_status == "graded" and not body.include_graded:
+            skipped += 1
+            continue
+        # A script whose every box a teacher has already decided has
+        # nothing left to mark, so it is not worth queueing.
+        if box_ids and protected_answer_box_ids(db, sub) >= box_ids:
             skipped += 1
             continue
         to_grade.append(sub)
@@ -414,11 +432,145 @@ def override_grade(
     # empty string" — stored as NULL so the model's feedback shows
     # through rather than being masked by a blank.
     grade.override_feedback = (body.feedback or "").strip() or None
-    grade.overridden_by = user.id
-    grade.overridden_at = datetime.now(timezone.utc)
-    # A human has looked at it, so it's no longer waiting on one.
-    if body.score is not None:
-        grade.needs_manual_review = False
+
+    if grade.override_score is None and grade.override_feedback is None:
+        # Clearing both is a teacher stepping back off this box, which
+        # hands it to the machine again. Without this, an override once
+        # set froze the box for ever, even after being emptied.
+        grade.overridden_by = None
+        grade.overridden_at = None
+    else:
+        grade.overridden_by = user.id
+        grade.overridden_at = datetime.now(timezone.utc)
+        # A human has looked at it, so it's no longer waiting on one.
+        if body.score is not None:
+            grade.needs_manual_review = False
+
+    db.commit()
+    return _grades_payload(db, sub)
+
+
+def _clear_marks(db: Session, sub: Submission) -> int:
+    """Put a script back to unmarked. Returns how many boxes were cleared."""
+    grades = db.query(AnswerGrade).filter(AnswerGrade.submission_id == sub.id).all()
+    for g in grades:
+        db.delete(g)
+    sub.grading_status = "ungraded"
+    sub.grading_error = None
+    sub.graded_at = None
+    return len(grades)
+
+
+@router.post("/submissions/{submission_id}/reset-marks", response_model=SubmissionGradesOut)
+def reset_marks(
+    submission_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Throw away every mark on one script so it can be marked afresh.
+
+    Both the model's marks and the teacher's own go, which is the point:
+    a box a teacher has decided is not re-marked, so clearing only the
+    machine's half would leave the script permanently half-frozen.
+
+    Refused once the marks are released. A student has seen those, and
+    wiping them from behind is not a correction. Withdraw them first.
+    """
+    sub = _get_submission_for_teacher(submission_id, db, user)
+    if sub.released:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "These marks have been released. Withdraw them first, then reset.",
+        )
+
+    _clear_marks(db, sub)
+    db.commit()
+    return _grades_payload(db, sub)
+
+
+@router.post("/questions/{question_id}/reset-all-marks", response_model=BulkReleaseResult)
+def reset_all_marks(
+    question_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    The same, for every script on a paper.
+
+    Released scripts are left exactly as they are and counted as
+    skipped, so one released student does not stop the rest being
+    reset, and is not quietly wiped either.
+    """
+    question = db.query(Question).filter(Question.id == question_id).first()
+    if question is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Question not found")
+    course = db.query(Course).filter(Course.id == question.course_id).first()
+    if user.role != "admin" and (course is None or course.teacher_id != user.id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Question not found")
+
+    changed = skipped = 0
+    for sub in db.query(Submission).filter(Submission.question_id == question_id).all():
+        if sub.released:
+            skipped += 1
+            continue
+        _clear_marks(db, sub)
+        changed += 1
+    db.commit()
+    return BulkReleaseResult(changed=changed, skipped=skipped)
+
+
+@router.patch("/submissions/{submission_id}/grades", response_model=SubmissionGradesOut)
+def override_grades(
+    submission_id: str,
+    body: BulkGradeOverride,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Set the teacher's marks for several answer boxes at once.
+
+    Saving a script one box at a time meant a teacher who had read the
+    whole thing still had to press a button per part, and a page reload
+    halfway through left half of their judgement recorded. Applied
+    together or not at all.
+    """
+    sub = _get_submission_for_teacher(submission_id, db, user)
+
+    grades = {
+        g.answer_box_id: g
+        for g in db.query(AnswerGrade).filter(AnswerGrade.submission_id == sub.id).all()
+    }
+
+    for entry in body.grades:
+        grade = grades.get(entry.answer_box_id)
+        if grade is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                f"No mark for answer box {entry.answer_box_id}",
+            )
+        if entry.score is not None and (entry.score < 0 or entry.score > grade.max_score):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Score for {entry.answer_box_id} must be between 0 and {grade.max_score}",
+            )
+
+    now = datetime.now(timezone.utc)
+    for entry in body.grades:
+        grade = grades[entry.answer_box_id]
+        grade.override_score = entry.score
+        grade.override_feedback = (entry.feedback or "").strip() or None
+        # Nothing of the teacher's left on the box means they have not
+        # decided it after all, so it goes back to being the machine's
+        # to re-mark.
+        if grade.override_score is None and grade.override_feedback is None:
+            grade.overridden_by = None
+            grade.overridden_at = None
+        else:
+            grade.overridden_by = user.id
+            grade.overridden_at = now
+            if entry.score is not None:
+                grade.needs_manual_review = False
 
     db.commit()
     return _grades_payload(db, sub)

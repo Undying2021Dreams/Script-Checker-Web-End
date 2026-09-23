@@ -409,19 +409,48 @@ def test_override_outside_the_maximum_is_rejected(client, graded_setup, monkeypa
     assert res.status_code == 400
 
 
-def test_regrading_does_not_undo_a_teachers_override(client, graded_setup, monkeypatch, db):
+def test_regrading_does_not_even_look_at_a_box_a_teacher_has_decided(
+    client, graded_setup, monkeypatch, db
+):
+    """
+    A box carrying a teacher's mark is not re-marked at all.
+
+    It used to be re-marked and the fresh machine score recorded
+    alongside, with the override winning on display. That spent a call
+    on an answer whose mark was already settled, and left the box
+    showing a "model marked" figure that had never been part of any
+    decision. Now the model is not asked, so the old figure stands
+    exactly as it was when the teacher looked at it.
+
+    Resetting the mark is what hands the box back.
+    """
     _use_fake_provider(monkeypatch, ["SCORE: 5\nFEEDBACK: ok", "SCORE: 3\nFEEDBACK: ok"])
     sub = graded_setup["submission"]
     teacher = graded_setup["teacher"]
     _grade(client, teacher, sub.id)
     client.as_user(teacher).patch(f"/api/submissions/{sub.id}/grades/a1", json={"score": 1})
 
-    _use_fake_provider(monkeypatch, ["SCORE: 4\nFEEDBACK: changed", "SCORE: 3\nFEEDBACK: ok"])
+    # Only one box is left to mark, so only the first reply is used —
+    # and a2 is out of 3, so it has to be a mark that box could have.
+    _use_fake_provider(monkeypatch, ["SCORE: 2\nFEEDBACK: changed"])
     body = _grade(client, teacher, sub.id).json()
 
     a1 = next(g for g in body["grades"] if g["answer_box_id"] == "a1")
-    assert a1["llm_score"] == 4   # the model's fresh mark is recorded
-    assert a1["score"] == 1       # the human's decision still stands
+    assert a1["score"] == 1        # the human's decision still stands
+    assert a1["llm_score"] == 5    # untouched: the model was never asked again
+
+    # The box nobody claimed was re-marked as usual — it takes the first
+    # scripted reply, because the protected box never asked for one.
+    a2 = next(g for g in body["grades"] if g["answer_box_id"] == "a2")
+    assert a2["llm_score"] == 2, "the unclaimed box should still be re-marked"
+
+    # And a reset puts it back within the machine's reach.
+    assert client.as_user(teacher).post(f"/api/submissions/{sub.id}/reset-marks").status_code == 200
+    _use_fake_provider(monkeypatch, ["SCORE: 4\nFEEDBACK: changed", "SCORE: 3\nFEEDBACK: ok"])
+    after = _grade(client, teacher, sub.id).json()
+    a1_again = next(g for g in after["grades"] if g["answer_box_id"] == "a1")
+    assert a1_again["llm_score"] == 4
+    assert a1_again["override_score"] is None
 
 
 def test_release_requires_grading_first(client, graded_setup):
@@ -747,9 +776,12 @@ def test_regrading_leaves_a_teachers_mark_and_words_alone(client, graded_setup, 
     assert marked["override_feedback"] == "Method is right, arithmetic slipped."
     assert marked["score"] == 5, "the teacher's mark is the one that counts"
     assert marked["feedback"] == "Method is right, arithmetic slipped."
-    # The model's newer opinion is still recorded alongside, so a
-    # disputed mark can be traced.
-    assert marked["llm_score"] == 1
+    # What the model said when the teacher made their decision is still
+    # recorded alongside, so a disputed mark can be traced back to it.
+    # It is the *first* take: a box a teacher has decided is not put to
+    # the model again, so there is no second opinion to record.
+    assert marked["llm_score"] == 2
+    assert marked["llm_feedback"] == "model's first take"
 
     untouched = next(g for g in body["grades"] if g["answer_box_id"] == "a2")
     assert untouched["score"] == 1, "a box with no override still follows the model"
