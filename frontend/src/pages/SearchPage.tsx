@@ -1,21 +1,54 @@
 import { useState } from 'react'
+import { toast } from 'sonner'
 
+import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { StatusPill } from '@/components/ui/feedback'
-import { useCourseSearch, usePopularCourses } from '@/lib/queries'
+import { Pending, StatusPill } from '@/components/ui/feedback'
+import { useCourseSearch, usePopularCourses, useRequestToJoin } from '@/lib/queries'
 import type { CourseSummary } from '@/lib/types'
 
 function CourseRow({ course }: { course: CourseSummary }) {
+  const request = useRequestToJoin()
+
+  const ask = async () => {
+    try {
+      await request.mutateAsync(course.id)
+      toast.success('Asked to join — your teacher will decide')
+    } catch (err) {
+      toast.error((err as Error).message)
+    }
+  }
+
   return (
     <Card>
-      <CardContent className="flex items-center justify-between gap-3 py-4">
+      <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
         <div className="min-w-0">
           <p className="truncate font-medium">{course.title}</p>
           <p className="truncate text-sm text-muted-foreground">{course.teacher_name}</p>
         </div>
-        <StatusPill>{course.student_count} enrolled</StatusPill>
+
+        <div className="flex items-center gap-2">
+          <StatusPill>{course.student_count} enrolled</StatusPill>
+
+          {/* The search result already says where you stand, so this
+              knows what to offer without asking the server again. */}
+          {course.my_status === 'teaching' && <StatusPill tone="info">You teach this</StatusPill>}
+          {course.my_status === 'enrolled' && <StatusPill tone="success">You're in</StatusPill>}
+          {course.my_status === 'pending' && <StatusPill tone="warning">Asked</StatusPill>}
+          {(course.my_status === 'none' || course.my_status === 'declined') && (
+            <Button size="sm" variant="outline" onClick={ask} disabled={request.isPending}>
+              {request.isPending ? (
+                <Pending>Asking…</Pending>
+              ) : course.my_status === 'declined' ? (
+                'Ask again'
+              ) : (
+                'Request to join'
+              )}
+            </Button>
+          )}
+        </div>
       </CardContent>
     </Card>
   )

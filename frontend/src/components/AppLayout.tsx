@@ -2,6 +2,8 @@ import { useMsal } from '@azure/msal-react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
 
 import { Logo } from '@/components/Logo'
+import { MyAvatar } from '@/components/Avatar'
+import { NotificationBell } from '@/components/NotificationBell'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { Button } from '@/components/ui/button'
 import { useMe } from '@/lib/queries'
@@ -46,7 +48,18 @@ export function AppLayout() {
                 statement about a person once the same account could teach
                 one course and take another — the label belongs on the
                 course, and that is where it now appears. */}
-            {me && <span className="text-sm text-muted-foreground">{me.display_name}</span>}
+            <NotificationBell />
+            {/* Your own name and face, and the way to your profile.
+                People look for their settings under their own face. */}
+            {me && (
+              <Link
+                to="/profile"
+                className="flex items-center gap-2 rounded-md px-1 py-0.5 text-sm text-muted-foreground hover:bg-muted"
+              >
+                <MyAvatar />
+                <span className="hidden sm:inline">{me.display_name}</span>
+              </Link>
+            )}
             <ThemeToggle />
             <Button variant="outline" size="sm" onClick={() => instance.logoutPopup()}>
               Sign out

@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 
 import { AssignmentsCard } from '@/components/AssignmentsCard'
 import { LeaderboardCard } from '@/components/LeaderboardCard'
+import { JoinRequestsCard } from '@/components/JoinRequestsCard'
 import { QuestionsCard } from '@/components/QuestionsCard'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -119,7 +120,10 @@ export function CourseDetailPage() {
       )}
 
       {isTeacher ? (
-        <QuestionsCard courseId={courseId} />
+        <>
+          <JoinRequestsCard courseId={courseId} isTeacher={isTeacher} />
+          <QuestionsCard courseId={courseId} />
+        </>
       ) : (
         <AssignmentsCard courseId={courseId} enabled={!!me} />
       )}
