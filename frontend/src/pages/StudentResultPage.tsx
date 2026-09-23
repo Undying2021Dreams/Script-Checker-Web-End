@@ -9,7 +9,7 @@ import {
   PageHeader,
   StatusPill,
 } from '@/components/ui/feedback'
-import { useSubmissionGrades } from '@/lib/queries'
+import { useSubmissionAnswers, useSubmissionGrades } from '@/lib/queries'
 
 /**
  * A student's own result, on its own page.
@@ -20,9 +20,19 @@ import { useSubmissionGrades } from '@/lib/queries'
  * assignment. Reading your result is its own task and deserves its own
  * screen — and a page can be linked to, reloaded and kept open.
  */
+/** Crops are stored as absolute URLs; AuthedImage wants the API path
+ *  so it can attach the bearer token. */
+function cropPath(cropUrl: string): string {
+  const idx = cropUrl.indexOf('/api/')
+  return idx >= 0 ? cropUrl.slice(idx + 4) : cropUrl
+}
+
 export function StudentResultPage() {
   const { submissionId = '' } = useParams()
   const { data, isLoading, error } = useSubmissionGrades(submissionId)
+  // The crops themselves are refused until the marks are released, so
+  // this is only ever asked for a result the student is allowed to see.
+  const { data: answers } = useSubmissionAnswers(submissionId)
 
   const courseLink = (
     <Link to="/" className="text-sm text-muted-foreground hover:underline">
@@ -78,7 +88,9 @@ export function StudentResultPage() {
         />
       )}
 
-      {data.grades.map((g) => (
+      {data.grades.map((g) => {
+        const mine = answers?.answer_boxes.find((b) => b.answer_box_id === g.answer_box_id)
+        return (
         <Card key={g.answer_box_id}>
           <CardHeader className="flex flex-row items-center justify-between gap-3 pb-3">
             <CardTitle className="text-base">
@@ -90,6 +102,29 @@ export function StudentResultPage() {
           </CardHeader>
 
           <CardContent className="space-y-4">
+            {/* What was actually marked. A student told they lost two
+                marks has no way to check that against their own
+                working unless they can see the piece of it the marking
+                was done on — and if the wrong part of the page was
+                cropped, this is where they would notice. */}
+            {mine && mine.parts.length > 0 && (
+              <div className="space-y-2">
+                {mine.parts.map((part) => (
+                  <PaperImage
+                    key={`${part.part}-${part.crop_url}`}
+                    kind="student"
+                    path={cropPath(part.crop_url)}
+                    alt={`Your answer to ${g.label || `part ${g.order_index + 1}`}`}
+                    caption={
+                      mine.parts.length > 1
+                        ? `Your answer — part ${part.part + 1} of ${mine.parts.length}`
+                        : 'Your answer'
+                    }
+                  />
+                ))}
+              </div>
+            )}
+
             {g.feedback && (
               <div className="rounded-lg bg-muted/60 p-3 text-sm">
                 <p className="mb-1 text-xs font-medium text-muted-foreground">
@@ -120,7 +155,8 @@ export function StudentResultPage() {
             )}
           </CardContent>
         </Card>
-      ))}
+        )
+      })}
     </div>
   )
 }

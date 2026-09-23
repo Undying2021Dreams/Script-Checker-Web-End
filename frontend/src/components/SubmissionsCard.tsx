@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/dialog'
 import {
   useDeleteSubmission,
+  useResetAllMarks,
   useGradeAll,
   useReleaseAll,
   useSubmissions,
@@ -116,6 +117,7 @@ const PROVIDERS = [
 export function SubmissionsCard({ questionId }: { questionId: string }) {
   const navigate = useNavigate()
   const { data: submissions, isLoading, error } = useSubmissions(questionId)
+  const resetAll = useResetAllMarks(questionId)
   const upload = useUploadSubmission(questionId)
   const gradeAll = useGradeAll(questionId)
   const releaseAll = useReleaseAll(questionId)
@@ -297,6 +299,53 @@ export function SubmissionsCard({ questionId }: { questionId: string }) {
             hint="Print the paper, have it answered, then upload a photo or scan of the completed page."
           />
         )}
+
+        <Dialog>
+          <DialogTrigger
+            render={
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-destructive"
+                disabled={resetAll.isPending || !submissions?.length}
+              >
+                {resetAll.isPending ? <Pending>Resetting…</Pending> : 'Reset all marks'}
+              </Button>
+            }
+          />
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Reset every mark on this paper?</DialogTitle>
+              <DialogDescription>
+                Every script goes back to unmarked — the model's marks and yours alike — and the
+                paper becomes eligible to be marked again. Scripts whose marks have been
+                released are left exactly as they are; withdraw those first if you want them
+                reset too.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <DialogClose render={<Button variant="ghost">Keep them</Button>} />
+              <Button
+                variant="destructive"
+                disabled={resetAll.isPending}
+                onClick={async () => {
+                  try {
+                    const r = await resetAll.mutateAsync()
+                    toast.success(
+                      r.skipped
+                        ? `Reset ${r.changed}; left ${r.skipped} released script(s) alone`
+                        : `Reset ${r.changed} script(s)`,
+                    )
+                  } catch (err) {
+                    toast.error((err as Error).message)
+                  }
+                }}
+              >
+                {resetAll.isPending ? <Pending>Resetting…</Pending> : 'Reset all'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {submissions?.map((s) => (
           <div

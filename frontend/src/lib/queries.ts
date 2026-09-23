@@ -321,6 +321,49 @@ export function useDeleteSubmission(questionId: string) {
 }
 
 
+export function useOverrideGrades(submissionId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (grades: { answer_box_id: string; score: number | null; feedback: string | null }[]) =>
+      apiFetch<SubmissionGrades>(`/submissions/${submissionId}/grades`, {
+        method: 'PATCH',
+        body: JSON.stringify({ grades }),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['grades', submissionId] })
+      qc.invalidateQueries({ queryKey: ['submissions'] })
+    },
+  })
+}
+
+export function useResetMarks(submissionId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      apiFetch<SubmissionGrades>(`/submissions/${submissionId}/reset-marks`, { method: 'POST' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['grades', submissionId] })
+      qc.invalidateQueries({ queryKey: ['submissions'] })
+    },
+  })
+}
+
+export function useResetAllMarks(questionId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      apiFetch<{ changed: number; skipped: number }>(
+        `/questions/${questionId}/reset-all-marks`,
+        { method: 'POST' },
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['submissions', questionId] })
+      qc.invalidateQueries({ queryKey: ['grades'] })
+    },
+  })
+}
+
+
 export function useUploadSubmission(questionId: string) {
   const qc = useQueryClient()
   return useMutation({
