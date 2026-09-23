@@ -7,6 +7,7 @@ import { CoursesPage } from './pages/CoursesPage'
 import { GradebookPage } from './pages/GradebookPage'
 import { LoginPage } from './pages/LoginPage'
 import { QuestionEditorPage } from './pages/QuestionEditorPage'
+import { ProfilePage } from '@/pages/ProfilePage'
 import { SearchPage } from './pages/SearchPage'
 import { StudentResultPage } from './pages/StudentResultPage'
 import { SubmitPage } from './pages/SubmitPage'
@@ -21,6 +22,7 @@ function App() {
           <Route element={<AppLayout />}>
             <Route path="/" element={<CoursesPage />} />
             <Route path="/search" element={<SearchPage />} />
+            <Route path="/profile" element={<ProfilePage />} />
             <Route path="/courses/:courseId" element={<CourseDetailPage />} />
             <Route path="/courses/:courseId/gradebook" element={<GradebookPage />} />
             <Route path="/questions/:questionId" element={<QuestionEditorPage />} />

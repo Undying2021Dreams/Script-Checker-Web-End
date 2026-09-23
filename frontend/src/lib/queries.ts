@@ -10,6 +10,8 @@ import type {
   EnrolledStudent,
   Me,
   GroundTruthPreview,
+  JoinRequestOut,
+  NotificationList,
   GroupedSubmission,
   Question,
   QuestionDocPayload,
@@ -375,6 +377,83 @@ export function useResetAllMarks(questionId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['submissions', questionId] })
       qc.invalidateQueries({ queryKey: ['grades'] })
+    },
+  })
+}
+
+
+export function useNotifications() {
+  return useQuery({
+    queryKey: ['notifications'],
+    queryFn: () => apiFetch<NotificationList>('/notifications'),
+    // The bell is the one thing on screen that is about events rather
+    // than state, so it is the one thing worth asking about on a timer.
+    refetchInterval: 60_000,
+  })
+}
+
+export function useMarkNotificationsRead() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (notificationId?: string) =>
+      apiFetch<NotificationList>(
+        `/notifications/read${notificationId ? `?notification_id=${notificationId}` : ''}`,
+        { method: 'POST' },
+      ),
+    onSuccess: (data) => qc.setQueryData(['notifications'], data),
+  })
+}
+
+export function useUpdateProfile() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { display_name?: string; institution?: string }) =>
+      apiFetch<Me>('/me', { method: 'PATCH', body: JSON.stringify(body) }),
+    onSuccess: (me) => qc.setQueryData(['me'], me),
+  })
+}
+
+export function useSetAvatar() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (file: File) => {
+      const form = new FormData()
+      form.append('image', file)
+      return apiFetch<Me>('/me/avatar', { method: 'POST', body: form })
+    },
+    onSuccess: (me) => qc.setQueryData(['me'], me),
+  })
+}
+
+export function useRequestToJoin() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (courseId: string) =>
+      apiFetch<{ status: string }>(`/courses/${courseId}/request-join`, { method: 'POST' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['course-search'] }),
+  })
+}
+
+export function useJoinRequests(courseId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['join-requests', courseId],
+    queryFn: () => apiFetch<JoinRequestOut[]>(`/courses/${courseId}/join-requests`),
+    enabled,
+  })
+}
+
+export function useDecideJoinRequest(courseId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ requestId, approve }: { requestId: string; approve: boolean }) =>
+      apiFetch<JoinRequestOut>(
+        `/courses/${courseId}/join-requests/${requestId}?approve=${approve}`,
+        { method: 'POST' },
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['join-requests', courseId] })
+      qc.invalidateQueries({ queryKey: ['course', courseId] })
+      qc.invalidateQueries({ queryKey: ['students', courseId] })
     },
   })
 }

@@ -7,6 +7,10 @@ export interface Me {
   // setting as well as the account, so it is told to us rather than
   // inferred from the role.
   can_create_courses: boolean
+  institution: string | null
+  // Whether there is a picture to fetch, so we can fall back to initials
+  // without a request we expect to 404.
+  has_avatar: boolean
 }
 
 export interface Course {
@@ -28,6 +32,9 @@ export interface CourseSummary {
   title: string
   teacher_name: string
   student_count: number
+  // Where we already stand with this course, so the button can say the
+  // right thing without a request per row.
+  my_status: 'none' | 'pending' | 'declined' | 'enrolled' | 'teaching'
 }
 
 export interface EnrolledStudent {
@@ -238,4 +245,31 @@ export interface Leaderboard {
   ranked: number
   class_average: number | null
   named: boolean
+}
+
+
+export interface NotificationItem {
+  id: string
+  kind: string
+  title: string
+  body: string | null
+  link: string | null
+  read: boolean
+  created_at: string
+}
+
+export interface NotificationList {
+  items: NotificationItem[]
+  unread: number
+}
+
+export interface JoinRequestOut {
+  id: string
+  course_id: string
+  course_title: string
+  student_id: string
+  student_name: string
+  student_email: string
+  status: 'pending' | 'approved' | 'declined'
+  created_at: string
 }
