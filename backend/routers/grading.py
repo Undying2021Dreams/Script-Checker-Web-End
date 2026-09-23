@@ -31,6 +31,7 @@ from ratelimit import BULK_LLM_LIMIT, LLM_LIMIT, limiter
 from security import get_current_user
 from services.grading import pair_answer_boxes_with_ground_truth
 from services.llm_provider import extract_plain_text
+from services.notify import notify
 from services.grading_runner import (
     grade_submission,
     protected_answer_box_ids,
@@ -613,6 +614,15 @@ def release_grades(
         raise HTTPException(status.HTTP_409_CONFLICT, "Grade the submission before releasing it")
 
     sub.released_at = datetime.now(timezone.utc)
+    totals = submission_totals(db, sub.id)
+    notify(
+        db,
+        sub.student_id,
+        kind="marks_released",
+        title="Your marks are ready",
+        body=f"{totals['earned']} out of {totals['max']}",
+        link=f"/results/{sub.id}",
+    )
     db.commit()
     return _grades_payload(db, sub)
 
@@ -653,6 +663,16 @@ def release_all_submissions(
             skipped += 1
             continue
         sub.released_at = now if body.released else None
+        if body.released:
+            totals = submission_totals(db, sub.id)
+            notify(
+                db,
+                sub.student_id,
+                kind="marks_released",
+                title="Your marks are ready",
+                body=f"{totals['earned']} out of {totals['max']}",
+                link=f"/results/{sub.id}",
+            )
         changed += 1
 
     db.commit()

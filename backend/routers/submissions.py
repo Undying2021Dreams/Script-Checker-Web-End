@@ -23,6 +23,7 @@ from schemas import (
     GroupedAnswerBoxOut,
     AnswerPartOut,
 )
+from services.notify import notify
 from services.extractor import assess_image, extract_page, identify_page, scan_photograph
 from routers.questions import _question_to_dict
 from ratelimit import HEAVY_CPU_LIMIT, limiter
@@ -846,6 +847,26 @@ def hand_in_submission(
         )
 
     sub.submitted_at = datetime.now(timezone.utc)
+
+    # The teacher, not the class. A script arriving is news to the one
+    # person who has to mark it.
+    course = (
+        db.query(Course)
+        .join(Question, Question.course_id == Course.id)
+        .filter(Question.id == sub.question_id)
+        .first()
+    )
+    question = db.query(Question).filter(Question.id == sub.question_id).first()
+    if course is not None and course.teacher_id != user.id:
+        notify(
+            db,
+            course.teacher_id,
+            kind="script_submitted",
+            title=f"{user.display_name} handed in their answer",
+            body=(question.title if question and question.title else None),
+            link=f"/submissions/{sub.id}",
+        )
+
     db.commit()
     return {"submission_id": sub.id, "submitted_at": sub.submitted_at}
 

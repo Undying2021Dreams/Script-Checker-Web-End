@@ -18,6 +18,11 @@ class UserOut(BaseModel):
     # Sent because the client cannot work it out: it depends on a
     # deployment setting as well as the account.
     can_create_courses: bool = True
+    # Editable by the person themselves; see routers/me.py.
+    institution: str | None = None
+    # Whether there is a picture to fetch, so a client can fall back to
+    # initials without a request that it expects to 404.
+    has_avatar: bool = False
 
 
 class CourseCreate(BaseModel):
@@ -48,6 +53,9 @@ class CourseSummary(BaseModel):
     title: str
     teacher_name: str
     student_count: int
+    # Where the person searching already stands with this course, so the
+    # button can say "Request to join", "Requested", or nothing at all.
+    my_status: Literal["none", "pending", "declined", "enrolled", "teaching"] = "none"
 
 
 class LeaderboardEntry(BaseModel):
@@ -69,6 +77,46 @@ class LeaderboardOut(BaseModel):
     ranked: int
     class_average: float | None
     named: bool
+
+
+class ProfileUpdate(BaseModel):
+    """What a person may change about themselves.
+
+    Not their role or their email: both come from Entra ID and from the
+    deployment's teacher list, and letting someone edit either would be
+    letting them grant themselves a course.
+    """
+
+    display_name: str | None = Field(default=None, min_length=1, max_length=120)
+    institution: str | None = Field(default=None, max_length=200)
+
+
+class EnrollmentRequestOut(BaseModel):
+    id: str
+    course_id: str
+    course_title: str
+    student_id: str
+    student_name: str
+    student_email: str
+    status: Literal["pending", "approved", "declined"]
+    created_at: datetime
+
+
+class NotificationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    kind: str
+    title: str
+    body: str | None
+    link: str | None
+    read: bool
+    created_at: datetime
+
+
+class NotificationList(BaseModel):
+    items: list[NotificationOut]
+    unread: int
 
 
 class JoinRequest(BaseModel):

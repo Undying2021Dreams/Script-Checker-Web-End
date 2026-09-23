@@ -11,7 +11,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from config import settings
 from ratelimit import limiter
 from models import User
-from routers import courses, grading, images, questions, student, submissions
+from routers import courses, me, grading, images, questions, student, submissions
 from schemas import UserOut
 from security import get_current_user
 
@@ -37,21 +37,7 @@ app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), na
 api = APIRouter(prefix="/api")
 
 
-@api.get("/me", response_model=UserOut)
-def me(user: User = Depends(get_current_user)):
-    return UserOut(
-        id=user.id,
-        email=user.email,
-        display_name=user.display_name,
-        role=user.role,
-        # Depends on a deployment setting as well as the account, so the
-        # client is told rather than left to infer it from the role.
-        can_create_courses=(
-            settings.OPEN_COURSE_CREATION or user.role in ("teacher", "admin")
-        ),
-    )
-
-
+api.include_router(me.router)
 api.include_router(courses.router)
 api.include_router(questions.router)
 api.include_router(submissions.router)
