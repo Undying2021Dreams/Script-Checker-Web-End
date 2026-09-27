@@ -290,6 +290,17 @@ class Submission(Base):
     # has reviewed them and released the submission deliberately.
     released_at = Column(DateTime, nullable=True)
 
+    # A grading run on the student's phone (routers/on_device.py). The
+    # token names the one run whose results may be posted; a new start
+    # replaces it. `on_device_started_at` is set only while a phone run
+    # is in progress, which is what tells it apart from a teacher-started
+    # server run in the same "grading" status. `on_device_posted_at` is
+    # set once the phone's marks are saved, so a run waiting on fallback
+    # can be told apart from one that never posted. All naive UTC.
+    on_device_run_token = Column(String, nullable=True)
+    on_device_started_at = Column(DateTime, nullable=True)
+    on_device_posted_at = Column(DateTime, nullable=True)
+
     @hybrid_property
     def released(self) -> bool:
         """Whether the student has been given these marks.
