@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
     SELF_HOSTED_LLM_URL: str = ""  # e.g. "https://xxxx.ngrok.io/v1"
 
+    # How long a grading run on a student's phone may take, fallback
+    # included, before it is marked failed (routers/on_device.py).
+    ON_DEVICE_LEASE_MINUTES: int = 15
+
     # Model ids are configurable because providers retire them: the
     # gemini-2.5-flash this was originally pinned to stopped accepting new
     # users, which surfaced as a 404 at call time rather than anywhere

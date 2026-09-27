@@ -1,3 +1,6 @@
+import asyncio
+import contextlib
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, status
@@ -11,11 +14,35 @@ from slowapi.middleware import SlowAPIMiddleware
 from config import settings
 from ratelimit import limiter
 from models import User
-from routers import courses, me, grading, images, questions, student, submissions
+from routers import courses, me, grading, images, on_device, questions, student, submissions
 from schemas import UserOut
 from security import get_current_user
+from services.on_device import sweep_forever
 
-app = FastAPI(title="Web-End API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Start the on-device lease sweeper (services/on_device.py) with the app.
+
+    It marks phone grading runs that outlived ON_DEVICE_LEASE_MINUTES as
+    failed. The routes run the same check lazily, so this only matters for
+    runs nobody asks about again. Tests turn it off by setting
+    `app.state.on_device_sweeper = False` and drive the sweep directly.
+    """
+    task = None
+    if getattr(app.state, "on_device_sweeper", True):
+        task = asyncio.create_task(sweep_forever())
+    try:
+        yield
+    finally:
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+
+app = FastAPI(title="Web-End API", lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
@@ -44,6 +71,7 @@ api.include_router(submissions.router)
 api.include_router(images.router)
 api.include_router(grading.router)
 api.include_router(student.router)
+api.include_router(on_device.router)
 app.include_router(api)
 
 

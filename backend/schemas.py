@@ -458,3 +458,129 @@ class AnswerBoxMarks(BaseModel):
     single box outweigh the whole paper."""
 
     points: int = Field(ge=0, le=1000)
+
+
+# ── On-device grading (routers/on_device.py) ────────────────────────
+
+class PackMarkers(BaseModel):
+    aruco_dict: str
+    marker_size_px: int
+    marker_margin_px: int
+    # Marker id -> canonical centre [x, y]. Served, never computed on the
+    # phone, so the two registrations cannot drift apart.
+    centres: dict[str, list[int]]
+
+
+class PackBox(BaseModel):
+    id: str
+    label: str | None
+    points: int | None
+    order_index: int
+    page_index: int | None
+    bbox: list[int] | None
+    # [[page, x, y, w, h], ...], one crop per segment ("part").
+    segments: list[list[int]] | None
+    question_text: str
+    # The answer key. See the pack route's docstring.
+    model_answer_text: str
+    # Relative to the pack's own URL, e.g. "pack/images/model-answer/<id>".
+    model_answer_images: list[str]
+    question_images: list[str]
+    blocked_reason: str | None
+
+
+class AssignmentPack(BaseModel):
+    pack_version: int
+    question_id: str
+    course_id: str
+    title: str | None
+    page_w_px: int | None
+    page_h_px: int | None
+    page_count: int | None
+    dpi: int
+    markers: PackMarkers
+    boxes: list[PackBox]
+
+
+class OnDeviceRunStarted(BaseModel):
+    run_token: str
+    started_at: datetime
+    lease_expires_at: datetime
+    eligible_box_ids: list[str]
+    protected_box_ids: list[str]
+
+
+class OnDeviceBoxResult(BaseModel):
+    answer_box_id: str
+    outcome: Literal["scored", "blank", "needs_review"]
+    # Required for "scored"; ignored for "blank" (saved as 0) and
+    # "needs_review" (saved as no mark).
+    score: float | None = None
+    feedback: str | None = Field(default=None, max_length=5000)
+    # The parsed CONFIDENCE line, 0..100. Not stored on its own: it is
+    # already in raw_response.
+    confidence: float | None = Field(default=None, ge=0, le=100)
+    raw_response: str | None = Field(default=None, max_length=20000)
+    review_reason: str | None = Field(default=None, max_length=500)
+
+
+class OnDeviceResultsIn(BaseModel):
+    run_token: str
+    # The app's fallbackEnabled flag. Fallback also needs the server's
+    # SELF_HOSTED_LLM_URL.
+    use_fallback: bool = True
+    fallback_box_ids: list[str] = []
+    results: list[OnDeviceBoxResult]
+
+
+class OnDeviceRunInfo(BaseModel):
+    started_at: datetime | None
+    posted_at: datetime | None
+    lease_expires_at: datetime | None
+
+
+class OnDeviceBoxGrade(BaseModel):
+    answer_box_id: str
+    label: str | None
+    order_index: int
+    max_score: int | None
+    score: float | None
+    feedback: str | None
+    provider: str | None
+    needs_manual_review: bool
+    review_reason: str | None
+    pending_fallback: bool
+
+
+class OnDeviceGradesOut(BaseModel):
+    """
+    A student's own marks. Provisional until the teacher releases them;
+    `provisional` is simply `not released`.
+    """
+
+    submission_id: str
+    question_id: str
+    grading_status: str
+    grading_error: str | None
+    released: bool
+    provisional: bool
+    earned: float
+    max_score: int
+    graded_count: int
+    needs_review_count: int
+    pending_fallback_count: int
+    run: OnDeviceRunInfo
+    boxes: list[OnDeviceBoxGrade]
+
+
+class OnDeviceResultsOut(OnDeviceGradesOut):
+    # "scheduled": the server is re-marking the flagged boxes;
+    # "unavailable": they were sent to teacher review instead;
+    # "completed": a server re-mark has finished; "none": nothing flagged.
+    fallback: Literal["none", "scheduled", "unavailable", "completed"]
+    fallback_message: str | None = None
+
+
+class ReevaluationRequest(BaseModel):
+    answer_box_ids: list[str] | None = None
+    message: str | None = Field(default=None, max_length=1000)

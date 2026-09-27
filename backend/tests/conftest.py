@@ -36,6 +36,10 @@ from main import app  # noqa: E402
 from models import User  # noqa: E402
 from security import get_current_user  # noqa: E402
 
+# The on-device lease sweeper loop stays off under test; tests that need
+# a sweep call services.on_device.expire_stale_runs themselves.
+app.state.on_device_sweeper = False
+
 
 @pytest.fixture
 def pages_without_codes(monkeypatch):
