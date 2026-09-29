@@ -44,9 +44,6 @@ export function LoginPage() {
           <Button className="w-full" onClick={handleLogin} disabled={loading}>
             {loading ? <Pending>Signing in…</Pending> : 'Sign in with Microsoft'}
           </Button>
-          <p className="text-center text-xs text-muted-foreground">
-            Use your university Microsoft account.
-          </p>
           {error && <p className="text-sm text-destructive break-words">{error}</p>}
         </CardContent>
       </Card>
